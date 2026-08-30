@@ -1,0 +1,6 @@
+{
+  "name": "VUA Autonomous Crypto Trading System",
+  "description": "Closed-loop autonomous crypto trading intelligence with Bybit & Binance market perception, multi-agent reasoning brain, deterministic risk governance, and self-improvement research lab.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
