@@ -14,6 +14,7 @@ import { RiskGovernanceView } from './components/RiskGovernanceView';
 import { EpistemicJournalView } from './components/EpistemicJournalView';
 import { ResearchLabView } from './components/ResearchLabView';
 import { KillSwitchModal } from './components/KillSwitchModal';
+import { TutorialView } from './components/TutorialView';
 import {
   SystemStatus,
   MarketPerceptionSnapshot,
@@ -29,10 +30,10 @@ import {
   BacktestResult,
 } from './types/trading';
 
-type ActiveTab = 'terminal' | 'perception' | 'risk' | 'journal' | 'lab';
+type ActiveTab = 'tutorial' | 'terminal' | 'perception' | 'risk' | 'journal' | 'lab';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('terminal');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('tutorial');
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [snapshot, setSnapshot] = useState<MarketPerceptionSnapshot | null>(null);
   const [debate, setDebate] = useState<MultiAgentDebate | null>(null);
@@ -384,6 +385,19 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex items-center space-x-1.5 sm:space-x-3 overflow-x-auto py-2.5">
             <button
+              id="vua-nav-tutorial"
+              onClick={() => setActiveTab('tutorial')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold uppercase transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'tutorial'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>User Guide</span>
+            </button>
+
+            <button
               id="vua-nav-terminal"
               onClick={() => setActiveTab('terminal')}
               className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold uppercase transition-all whitespace-nowrap cursor-pointer ${
@@ -453,6 +467,8 @@ export default function App() {
 
       {/* Main Workspace Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        {activeTab === 'tutorial' && <TutorialView />}
+        
         {activeTab === 'terminal' && (
           <AutonomousTerminal
             snapshot={snapshot}
