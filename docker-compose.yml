@@ -1,0 +1,27 @@
+# Docker Compose for VUA Trading Agent — Development Database
+# TASK-P0-002: PostgreSQL foundation only.
+# This file declares ONLY the PostgreSQL service required by P0-002.
+# No other downstream services (exchange adapter, Redis, Kafka, etc.) are declared here.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vua_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vua_trading
+    ports:
+      - "5432:5432"
+    volumes:
+      - vua_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vua_trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  vua_pg_data:
+    name: vua_pg_data

@@ -54,7 +54,8 @@ export class BybitService {
         timestamp: Date.now(),
       };
     } catch (err) {
-      return this.generateSyntheticTicker(symbol);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      throw new Error(`Bybit getTicker failed for ${symbol}: ${message}`);
     }
   }
 
@@ -105,7 +106,8 @@ export class BybitService {
         timestamp: Date.now(),
       };
     } catch (err) {
-      return this.generateSyntheticOrderBook(symbol);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      throw new Error(`Bybit getOrderBook failed for ${symbol}: ${message}`);
     }
   }
 
@@ -133,91 +135,21 @@ export class BybitService {
         volume: parseFloat(k[5]),
       }));
     } catch (err) {
-      return this.generateSyntheticCandles(symbol, limit);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      throw new Error(`Bybit getKlines failed for ${symbol}: ${message}`);
     }
   }
 
-  private generateSyntheticTicker(symbol: string): MarketTicker {
-    const base = symbol.includes('BTC') ? 67440 : symbol.includes('ETH') ? 3418 : 147.8;
-    const spread = base * 0.00022;
-    return {
-      symbol,
-      exchange: 'bybit',
-      price: base,
-      bid: base - spread / 2,
-      ask: base + spread / 2,
-      spread,
-      high24h: base * 1.028,
-      low24h: base * 0.972,
-      volume24h: 31400,
-      change24h: 2.05,
-      fundingRate: 0.0001,
-      openInterest: 145000000,
-      timestamp: Date.now(),
-    };
+  private generateSyntheticTicker(symbol: string): never {
+    throw new Error(`Synthetic fallback DISABLED (P0-003): getTicker failed for ${symbol}`);
   }
 
-  private generateSyntheticOrderBook(symbol: string): OrderBook {
-    const base = symbol.includes('BTC') ? 67440 : symbol.includes('ETH') ? 3418 : 147.8;
-    const bids: OrderBookLevel[] = [];
-    const asks: OrderBookLevel[] = [];
-    let bTot = 0;
-    let aTot = 0;
-
-    for (let i = 0; i < 15; i++) {
-      const bAmt = 0.6 + Math.random() * 2.2;
-      bTot += bAmt;
-      bids.push({
-        price: base - (i + 1) * (base * 0.0002),
-        amount: Number(bAmt.toFixed(4)),
-        total: Number(bTot.toFixed(4)),
-      });
-
-      const aAmt = 0.6 + Math.random() * 2.2;
-      aTot += aAmt;
-      asks.push({
-        price: base + (i + 1) * (base * 0.0002),
-        amount: Number(aAmt.toFixed(4)),
-        total: Number(aTot.toFixed(4)),
-      });
-    }
-
-    return {
-      symbol,
-      exchange: 'bybit',
-      bids,
-      asks,
-      imbalanceRatio: bTot / aTot,
-      timestamp: Date.now(),
-    };
+  private generateSyntheticOrderBook(symbol: string): never {
+    throw new Error(`Synthetic fallback DISABLED (P0-003): getOrderBook failed for ${symbol}`);
   }
 
-  private generateSyntheticCandles(symbol: string, count = 60): Candle[] {
-    const base = symbol.includes('BTC') ? 67100 : symbol.includes('ETH') ? 3405 : 146;
-    const candles: Candle[] = [];
-    let current = base;
-    const now = Date.now();
-    const step = 15 * 60 * 1000;
-
-    for (let i = count; i >= 0; i--) {
-      const delta = (Math.random() - 0.49) * (base * 0.004);
-      const open = current;
-      const close = current + delta;
-      const high = Math.max(open, close) + Math.random() * (base * 0.002);
-      const low = Math.min(open, close) - Math.random() * (base * 0.002);
-      const volume = 15 + Math.random() * 75;
-
-      candles.push({
-        timestamp: now - i * step,
-        open,
-        high,
-        low,
-        close,
-        volume,
-      });
-      current = close;
-    }
-    return candles;
+  private generateSyntheticCandles(symbol: string, count = 60): never {
+    throw new Error(`Synthetic fallback DISABLED (P0-003): getKlines failed for ${symbol}`);
   }
 }
 

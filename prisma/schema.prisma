@@ -1,0 +1,339 @@
+// VUA Trading Agent — Prisma Schema
+// TASK-P0-002: PostgreSQL + Prisma Initialization
+// ADR-002 APPROVED — Source of Truth: docs/audit/29-adr-002-database-review.md
+// Architecture: TypeScript core, PostgreSQL persistence, Prisma ORM + Migrate
+// ADR-001 APPROVED — TypeScript mandatory core; Python optional, no execution authority
+// Source-of-truth model: DESIRED → SUBMITTED → OBSERVED → PERSISTED → RECONCILED
+// Reconciliation NOT implemented in P0-002 (deferred to downstream task).
+// Exchange integration NOT implemented in P0-002 (deferred to ADR-003 / P0-003).
+// Trader Brain NOT activated. Live trading DISABLED.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// SYSTEM CONFIGURATION
+// ============================================================
+
+// Single active system configuration row.
+// DB authoritative. This is the only row (enforced at application level).
+model system_config {
+  id                        String   @id @default(uuid())
+  schema_version            Int      @default(1)
+  mode                     String   @default("PAPER") // PAPER | TESTNET | LIVE
+  selected_exchange        String   @default("BINANCE") // BINANCE | BYBIT
+  selected_symbol          String   @default("BTC/USDT")
+  initial_capital_usd     Decimal  @default(10000) @map("initial_capital_usd") @db.Decimal(18, 4)
+  current_equity_usd      Decimal  @default(10000) @map("current_equity_usd") @db.Decimal(18, 4)
+  daily_start_equity_usd  Decimal  @default(10000) @map("daily_start_equity_usd") @db.Decimal(18, 4)
+  high_water_mark_usd     Decimal  @default(10000) @map("high_water_mark_usd") @db.Decimal(18, 4)
+  max_drawdown_percent    Decimal  @default(3.0) @map("max_drawdown_percent") @db.Decimal(8, 4)
+  autonomous_cycle_seconds Int     @default(12) @map("autonomous_cycle_seconds")
+  auto_trading_enabled    Boolean  @default(false) @map("auto_trading_enabled")
+  engine_running          Boolean  @default(false) @map("engine_running")
+  kill_switch_engaged     Boolean  @default(false) @map("kill_switch_engaged")
+  created_at              DateTime @default(now()) @map("created_at")
+  updated_at              DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
+}
+
+// Append-only audit of all configuration changes.
+model config_history {
+  id                   String   @id @default(uuid())
+  config_type          String   @map("config_type") // RISK | ENGINE | MARKET | SYSTEM
+  previous_config_json Json     @map("previous_config_json")
+  new_config_json      Json     @map("new_config_json")
+  changed_by           String   @map("changed_by")
+  timestamp            DateTime @default(now())
+
+  @@index([config_type, timestamp])
+  @@map("config_history")
+}
+
+// ============================================================
+// TRADING DECISIONS (AI Proposals / Multi-Agent Debate)
+// ============================================================
+
+// AI proposal — DESIRED state. Advisory only. No execution authority.
+// This is the output of the multi-agent brain (CIO synthesizer).
+// Risk Governor decides whether execution is permitted (see risk_decisions).
+model decisions {
+  id                          String   @id @default(uuid())
+  snapshot_hash               String   @map("snapshot_hash")
+  symbol                      String
+  exchange                    String
+  regime_at_decision          String   @map("regime_at_decision")
+  regime_confidence           Decimal  @map("regime_confidence") @db.Decimal(6, 4)
+  trend_direction             String?  @map("trend_direction")
+  volatility_state            String?  @map("volatility_state")
+  macro_analyst_verdict      String   @map("macro_analyst_verdict")
+  technical_strategist_verdict String @map("technical_strategist_verdict")
+  contrarian_skeptic_verdict String   @map("contrarian_skeptic_verdict")
+  risk_officer_verdict       String   @map("risk_officer_verdict")
+  cio_synthesizer_verdict    String   @map("cio_synthesizer_verdict")
+  cio_final_verdict          String   @map("cio_final_verdict") // PROPOSE_LONG | PROPOSE_SHORT | NO_TRADE
+  confidence_score            Decimal  @map("confidence_score") @db.Decimal(6, 4)
+  edge_probability           Decimal  @map("edge_probability") @db.Decimal(6, 4)
+  synthesis_rationale        String   @db.Text @map("synthesis_rationale")
+  trade_hypothesis_json      Json?    @map("trade_hypothesis_json")
+  engine_mode                String   @map("engine_mode") // NEURAL_GEMINI | QUANTITATIVE_FALLBACK
+  created_at                 DateTime @default(now()) @map("created_at")
+
+  risk_decision risk_decisions?
+  orders     orders[]
+
+  @@index([symbol, exchange, created_at])
+  @@index([cio_final_verdict, created_at])
+  @@map("decisions")
+}
+
+// ============================================================
+// ORDERS (SUBMITTED State)
+// ============================================================
+
+// Order record — SUBMITTED state. DB authoritative for order identity.
+// VUA generates client_order_id for idempotency. Exchange uses this as idempotency key.
+model orders {
+  id                String    @id @default(uuid())
+  client_order_id   String    @map("client_order_id") // VUA-generated; idempotency key
+  exchange_order_id String?   @map("exchange_order_id") // assigned by exchange on ACK
+  decision_id       String?   @map("decision_id") @db.Uuid
+  symbol            String
+  exchange          String
+  side              String // BUY | SELL
+  order_type        String    @default("MARKET") @map("order_type") // MARKET | LIMIT | STOP_LOSS | TAKE_PROFIT
+  price             Decimal   @db.Decimal(20, 8)
+  quantity          Decimal   @db.Decimal(24, 8)
+  cost_usd          Decimal   @map("cost_usd") @db.Decimal(18, 4)
+  leverage          Decimal   @db.Decimal(8, 2)
+  status            String    @default("SUBMITTED") // SUBMITTED | ACKNOWLEDGED | PARTIALLY_FILLED | FILLED | CANCEL_REQUESTED | CANCELLED | REJECTED | UNKNOWN | RECONCILING | FAILED
+  filled_quantity   Decimal   @default(0) @map("filled_quantity") @db.Decimal(24, 8)
+  avg_fill_price    Decimal?  @map("avg_fill_price") @db.Decimal(20, 8)
+  total_fee_usd    Decimal   @default(0) @map("total_fee_usd") @db.Decimal(18, 4)
+  slippage_percent  Decimal   @default(0) @map("slippage_percent") @db.Decimal(8, 4)
+  created_at        DateTime  @default(now()) @map("created_at")
+  acknowledged_at   DateTime? @map("acknowledged_at")
+  filled_at         DateTime? @map("filled_at")
+  updated_at        DateTime  @updatedAt @map("updated_at")
+
+  decision    decisions? @relation(fields: [decision_id], references: [id], onDelete: SetNull)
+  fill_events fill_events[]
+  positions  positions[]
+
+  // IDEMPOTENCY: One logical order per (client_order_id, exchange, symbol)
+  @@unique([client_order_id, exchange, symbol])
+  @@index([symbol, exchange, status])
+  @@index([status, created_at])
+  @@map("orders")
+}
+
+// ============================================================
+// FILL EVENTS (Append-Only — OBSERVED State from Exchange)
+// ============================================================
+
+// Fill events — OBSERVED state from exchange. APPEND-ONLY.
+// Multiple fills per order allowed (partial fills, scale-in).
+// ORDER → FILL (0..N) → POSITION (aggregate). NOT 1:1.
+model fill_events {
+  id               String   @id @default(uuid())
+  order_id         String   @map("order_id") @db.Uuid
+  exchange_fill_id String   @map("exchange_fill_id")
+  symbol           String
+  exchange         String
+  side             String
+  fill_quantity    Decimal  @map("fill_quantity") @db.Decimal(24, 8)
+  fill_price       Decimal  @map("fill_price") @db.Decimal(20, 8)
+  fee_usd          Decimal  @map("fee_usd") @db.Decimal(18, 4)
+  fee_rate         Decimal  @map("fee_rate") @db.Decimal(8, 6)
+  liquidity        String?  // MAKER | TAKER
+  timestamp        DateTime @default(now())
+  event_sequence   Int      @map("event_sequence") // per-order sequence
+
+  order orders @relation(fields: [order_id], references: [id], onDelete: Restrict)
+
+  // Prevent duplicate fills
+  @@unique([exchange_fill_id, symbol, timestamp])
+  @@index([order_id, event_sequence])
+  @@index([timestamp])
+  @@map("fill_events")
+}
+
+// ============================================================
+// POSITIONS (Reconciled Current State — Aggregate of Fills)
+// ============================================================
+
+// Positions — RECONCILED current state. Aggregate of fills.
+// One position can receive fills from multiple orders (scale-in).
+// NOT 1:1 with orders. Fill events drive position state.
+// position_events records every change (append-only).
+model positions {
+  id                    String   @id @default(uuid())
+  originating_order_id   String   @map("originating_order_id") @db.Uuid // first order that opened this position
+  symbol                String
+  exchange              String
+  side                  String // LONG | SHORT
+  entry_price           Decimal  @map("entry_price") @db.Decimal(20, 8) // weighted average
+  current_price         Decimal? @map("current_price") @db.Decimal(20, 8)
+  quantity              Decimal  @db.Decimal(24, 8) // aggregate current
+  initial_quantity      Decimal  @map("initial_quantity") @db.Decimal(24, 8)
+  leverage              Decimal  @db.Decimal(8, 2)
+  initial_margin_usd    Decimal  @map("initial_margin_usd") @db.Decimal(18, 4)
+  unrealized_pnl_usd    Decimal  @default(0) @map("unrealized_pnl_usd") @db.Decimal(18, 4)
+  unrealized_pnl_percent Decimal  @default(0) @map("unrealized_pnl_percent") @db.Decimal(8, 4)
+  stop_loss_price       Decimal  @map("stop_loss_price") @db.Decimal(20, 8)
+  trailing_stop_price   Decimal? @map("trailing_stop_price") @db.Decimal(20, 8)
+  take_profit_1_price  Decimal  @map("take_profit_1_price") @db.Decimal(20, 8)
+  take_profit_2_price  Decimal  @map("take_profit_2_price") @db.Decimal(20, 8)
+  take_profit_3_price  Decimal  @map("take_profit_3_price") @db.Decimal(20, 8)
+  liquidation_price     Decimal  @map("liquidation_price") @db.Decimal(20, 8)
+  realized_pnl_usd      Decimal  @default(0) @map("realized_pnl_usd") @db.Decimal(18, 4)
+  status                String   @default("OPEN") // OPEN | CLOSED | LIQUIDATED
+  close_reason          String?  @map("close_reason")
+  opened_at             DateTime @default(now()) @map("opened_at")
+  closed_at             DateTime? @map("closed_at")
+  updated_at            DateTime @updatedAt @map("updated_at")
+
+  originating_order orders          @relation(fields: [originating_order_id], references: [id], onDelete: Restrict)
+  position_events position_events[]
+
+  @@index([symbol, exchange, status])
+  @@index([status, opened_at])
+  @@map("positions")
+}
+
+// ============================================================
+// POSITION EVENTS (Append-Only — PERSISTED State Changes)
+// ============================================================
+
+// Position events — APPEND-ONLY. PERSISTED state changes.
+// Records every meaningful position transition.
+// Historical events are NEVER modified or deleted.
+model position_events {
+  id                 String   @id @default(uuid())
+  position_id        String   @map("position_id") @db.Uuid
+  event_type         String   @map("event_type") // OPENED | PRICE_UPDATE | SL_TRIGGERED | TP1_TRIGGERED | TP2_TRIGGERED | TP3_TRIGGERED | QUANTITY_INCREASED | QUANTITY_REDUCED | CLOSED_MANUAL | CLOSED_CIRCUIT_BREAKER | CLOSED_KILL_SWITCH | LIQUIDATED
+  price              Decimal  @db.Decimal(20, 8)
+  quantity           Decimal  @db.Decimal(24, 8)
+  unrealized_pnl_usd Decimal  @map("unrealized_pnl_usd") @db.Decimal(18, 4)
+  realized_pnl_usd   Decimal? @map("realized_pnl_usd") @db.Decimal(18, 4)
+  fee_usd            Decimal? @map("fee_usd") @db.Decimal(18, 4)
+  metadata_json      Json?    @map("metadata_json")
+  timestamp          DateTime @default(now())
+  event_sequence     Int      @map("event_sequence") // per-position sequence
+
+  position positions @relation(fields: [position_id], references: [id], onDelete: Restrict)
+
+  @@unique([position_id, event_sequence])
+  @@index([position_id, timestamp])
+  @@index([event_type, timestamp])
+  @@map("position_events")
+}
+
+// ============================================================
+// RISK DECISIONS (Append-Only — Hard Veto Audit)
+// ============================================================
+
+// Risk decisions — APPEND-ONLY. Hard veto audit. NEVER OVERWRITTEN.
+// This is the authoritative record that the Deterministic Risk Governor
+// evaluated a proposed trade. AI may propose; Risk Governor decides.
+// This record is immutable — it proves what the Risk Governor decided.
+model risk_decisions {
+  id                               String   @id @default(uuid())
+  decision_id                      String?  @map("decision_id") @db.Uuid
+  order_id                         String?  @map("order_id") @db.Uuid
+  symbol                           String
+  exchange                         String
+  approved                         Boolean
+  veto_reason                     String?  @db.Text @map("veto_reason")
+  checks_passed_json              Json     @map("checks_passed_json")
+  max_allowed_risk_usd            Decimal  @map("max_allowed_risk_usd") @db.Decimal(18, 4)
+  recommended_position_size_usd     Decimal  @map("recommended_position_size_usd") @db.Decimal(18, 4)
+  recommended_leverage             Decimal  @map("recommended_leverage") @db.Decimal(8, 2)
+  estimated_liquidation_price      Decimal  @map("estimated_liquidation_price") @db.Decimal(20, 8)
+  kelly_fraction                  Decimal  @map("kelly_fraction") @db.Decimal(8, 4)
+  circuit_breaker_status          String   @map("circuit_breaker_status") // NORMAL | WARNING | TRIPPED
+  timestamp                       DateTime @default(now())
+
+  decision decisions? @relation(fields: [decision_id], references: [id], onDelete: SetNull)
+
+  @@index([symbol, exchange, timestamp])
+  @@index([approved, timestamp])
+  @@map("risk_decisions")
+}
+
+// ============================================================
+// RECONCILIATION EVENTS (Append-Only — RECONCILED State)
+// ============================================================
+
+// Reconciliation events — APPEND-ONLY. RECONCILED state discrepancies.
+// NOTE: Reconciliation engine itself is NOT implemented in P0-002.
+// The schema exists; the engine is a downstream task (not in P0-002 scope).
+// This table is for future reconciliation_event records.
+model reconciliation_events {
+  id                       String   @id @default(uuid())
+  symbol                   String
+  exchange                 String
+  event_type               String   @map("event_type") // POSITION_MISMATCH | ORDER_MISMATCH | FILL_MISMATCH | PRICE_ANOMALY
+  db_state_json            Json     @map("db_state_json")
+  exchange_state_json      Json     @map("exchange_state_json")
+  discrepancy_description  String   @db.Text @map("discrepancy_description")
+  resolution_action        String?  @db.Text @map("resolution_action")
+  severity                 String   @default("INFO") // INFO | WARNING | CRITICAL
+  timestamp                DateTime @default(now())
+
+  @@index([symbol, exchange, timestamp])
+  @@index([event_type, timestamp])
+  @@index([severity, timestamp])
+  @@map("reconciliation_events")
+}
+
+// ============================================================
+// SYSTEM EVENTS (Append-Only — Health / Errors / Kill Switch)
+// ============================================================
+
+// System events — APPEND-ONLY. Health, errors, kill switch, circuit breaker.
+model system_events {
+  id           String   @id @default(uuid())
+  event_type   String   @map("event_type") // ENGINE_START | ENGINE_STOP | KILL_SWITCH_ENGAGE | KILL_SWITCH_DISENGAGE | CIRCUIT_BREAKER_TRIP | DB_CONNECTION_LOST | EXCHANGE_DISCONNECT | WEB_SOCKET_ERROR | REST_TIMEOUT | PROCESS_CRASH | DATA_QUALITY_ERROR
+  description   String   @db.Text
+  severity     String   @default("INFO") // INFO | WARNING | CRITICAL
+  metadata_json Json?   @map("metadata_json")
+  timestamp    DateTime @default(now())
+
+  @@index([event_type, timestamp])
+  @@index([severity, timestamp])
+  @@map("system_events")
+}
+
+// ============================================================
+// MARKET DATA CANDLES (Historical — NOT Real-Time)
+// ============================================================
+
+// Historical market data candles for analysis and backtesting.
+// NOT real-time ticker — real-time is EPHEMERAL (Redis/memory, not this table).
+// Retention: HOT (30 days), WARM (up to 1 year), COLD (archive/Parquet after).
+model market_data_candles {
+  id          BigInt   @id @default(autoincrement())
+  symbol      String
+  exchange    String
+  interval    String // 1m | 5m | 15m | 1h | 4h | 1d
+  open        Decimal  @db.Decimal(20, 8)
+  high        Decimal  @db.Decimal(20, 8)
+  low         Decimal  @db.Decimal(20, 8)
+  close       Decimal  @db.Decimal(20, 8)
+  volume      Decimal  @db.Decimal(24, 8)
+  timestamp   DateTime
+  ingested_at DateTime @default(now()) @map("ingested_at")
+
+  @@unique([symbol, exchange, interval, timestamp])
+  @@index([symbol, exchange, interval, timestamp])
+  @@map("market_data_candles")
+}
