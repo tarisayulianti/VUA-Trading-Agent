@@ -77,7 +77,7 @@ Highest-level project map. Answers 13 mandatory questions. Contains Mermaid road
 | ADR | Topic | Status |
 |-----|-------|--------|
 | ADR-001 | TypeScript vs Python core | **APPROVED** — Hybrid (TS core + optional Python worker) |
-| ADR-002 | Database (PostgreSQL + Prisma) | **APPROVED** — Dual-Profile (SQLite Android / PostgreSQL 16 production); **P0-002-A SQLite Profile A = PASS** (Node 24 LTS + Prisma 7.10.0 + better-sqlite3 ARM64); **P0-002-B PostgreSQL Profile B = BLOCKED — ENVIRONMENT** (separate runtime; PC/server required) |
+| ADR-002 | Database (PostgreSQL) | **APPROVED** — Dual-Profile (SQLite Android / PostgreSQL 16 production); **P0-002-A SQLite Profile A = PASS**; **P0-002-B PostgreSQL Profile B = AWAITING U1 AUTHORIZATION** — forensic audit determined full UUID contract required; Option B minimal scope insufficient; see `docs/audit/44-p0-002-b-u1-full-uuid-contract-authorization.md` |
 | ADR-003 | Exchange abstraction (interface + ccxt) | PROPOSED — Handoff prepared in `32`; awaiting ADR-002 approval + exchange selection |
 | ADR-004 | Execution architecture (paper → testnet → live) | PROPOSED |
 | ADR-005 | AI orchestration (Gemini + deterministic fallback) | PROPOSED |

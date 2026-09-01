@@ -15,7 +15,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================================
@@ -66,7 +65,7 @@ model config_history {
 // This is the output of the multi-agent brain (CIO synthesizer).
 // Risk Governor decides whether execution is permitted (see risk_decisions).
 model decisions {
-  id                          String   @id @default(uuid())
+  id                          String   @id @default(uuid()) @db.Uuid
   snapshot_hash               String   @map("snapshot_hash")
   symbol                      String
   exchange                    String
@@ -102,7 +101,7 @@ model decisions {
 // Order record — SUBMITTED state. DB authoritative for order identity.
 // VUA generates client_order_id for idempotency. Exchange uses this as idempotency key.
 model orders {
-  id                String    @id @default(uuid())
+  id                String    @id @default(uuid()) @db.Uuid
   client_order_id   String    @map("client_order_id") // VUA-generated; idempotency key
   exchange_order_id String?   @map("exchange_order_id") // assigned by exchange on ACK
   decision_id       String?   @map("decision_id") @db.Uuid
@@ -143,7 +142,7 @@ model orders {
 // Multiple fills per order allowed (partial fills, scale-in).
 // ORDER → FILL (0..N) → POSITION (aggregate). NOT 1:1.
 model fill_events {
-  id               String   @id @default(uuid())
+  id               String   @id @default(uuid()) @db.Uuid
   order_id         String   @map("order_id") @db.Uuid
   exchange_fill_id String   @map("exchange_fill_id")
   symbol           String
@@ -175,7 +174,7 @@ model fill_events {
 // NOT 1:1 with orders. Fill events drive position state.
 // position_events records every change (append-only).
 model positions {
-  id                    String   @id @default(uuid())
+  id                    String   @id @default(uuid()) @db.Uuid
   originating_order_id   String   @map("originating_order_id") @db.Uuid // first order that opened this position
   symbol                String
   exchange              String
@@ -217,7 +216,7 @@ model positions {
 // Records every meaningful position transition.
 // Historical events are NEVER modified or deleted.
 model position_events {
-  id                 String   @id @default(uuid())
+  id                 String   @id @default(uuid()) @db.Uuid
   position_id        String   @map("position_id") @db.Uuid
   event_type         String   @map("event_type") // OPENED | PRICE_UPDATE | SL_TRIGGERED | TP1_TRIGGERED | TP2_TRIGGERED | TP3_TRIGGERED | QUANTITY_INCREASED | QUANTITY_REDUCED | CLOSED_MANUAL | CLOSED_CIRCUIT_BREAKER | CLOSED_KILL_SWITCH | LIQUIDATED
   price              Decimal  @db.Decimal(20, 8)
@@ -246,8 +245,8 @@ model position_events {
 // evaluated a proposed trade. AI may propose; Risk Governor decides.
 // This record is immutable — it proves what the Risk Governor decided.
 model risk_decisions {
-  id                               String   @id @default(uuid())
-  decision_id                      String?  @map("decision_id") @db.Uuid
+  id                               String   @id @default(uuid()) @db.Uuid
+  decision_id                      String?  @unique @map("decision_id") @db.Uuid
   order_id                         String?  @map("order_id") @db.Uuid
   symbol                           String
   exchange                         String

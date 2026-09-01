@@ -157,11 +157,16 @@ Canonical `prisma/schema.prisma` is the PostgreSQL source of truth. Profile B va
 
 - `datasource db { provider = "postgresql" }` — confirmed in existing canonical schema.
 - `url = env("DATABASE_URL")` — confirmed; no hardcoded connection.
++- Note for Prisma 7+: the canonical PostgreSQL schema no longer carries `url = env("DATABASE_URL")`; the connection URL is provided through the Prisma config layer, while the schema remains the source of truth for models, relations, and constraints.
 - 11 core entities (User, SystemConfig, MarketData, Order, Fill, Position, RiskDecision, ExecutionLog, Reconciliation, AgentDecision, ExchangeConnection) — confirmed.
 - ORDER → FILL (0..N) → POSITION relationship — confirmed in canonical.
 - Decimal precision handled by `Decimal` columns — confirmed.
 
 **No schema modification is authorized during P0-002-B.** Profile A's SQLite-adapted `prisma/schema-sqlite.prisma` is a Profile A artifact only and is explicitly excluded from this task.
+
+### 7.1 UUID Contract Note
+
+The initial Option B authorization addressed only `decisions.id` UUID typing. A subsequent complete PK/FK forensic audit (`docs/audit/44-p0-002-b-u1-full-uuid-contract-authorization.md`) determined that the intended PostgreSQL contract is **U1 — Full UUID Contract**: all UUID-like primary keys and foreign keys must use PostgreSQL `uuid`. Implementation of U1 requires separate explicit human authorization and is not covered by the original Option B scope alone.
 
 ---
 
