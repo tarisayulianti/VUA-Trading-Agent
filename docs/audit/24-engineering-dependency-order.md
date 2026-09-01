@@ -57,7 +57,7 @@ VUA v1.0
 
 1. **Language/Stack (ADR-001)** — Must be decided first. Everything else depends on runtime choice (Python vs TypeScript affects ORM, deployment, CI/CD).
 
-2. **Database (ADR-002)** — The repo has zero persistence. Without a database, no state survives restart, no backtesting on real data, no reconciliation, no audit trail. This is the single biggest blocker.
+2. **Database (ADR-002)** — Dual-profile architecture: Profile A (SQLite for Android/Termux/PRoot local runtime) and Profile B (PostgreSQL 16 for server/production). Without a database, no state survives restart, no backtesting on real data, no reconciliation, no audit trail. This is the single biggest blocker.
 
 3. **Persistence Architecture (ADR-006)** — Determines how trading events, orders, positions, and risk decisions are stored. Must align with database choice and blueprint's 10-table schema.
 

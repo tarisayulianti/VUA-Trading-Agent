@@ -1,13 +1,37 @@
-# ADR-002 — DATABASE / PERSISTENCE ARCHITECTURE REVIEW
+# ADR-002 — DATABASE / PERSISTENCE ARCHITECTURE
+## REVISED — DUAL-PROFILE DATABASE ARCHITECTURE
 
 **ADR ID:** ADR-002
 **Topic:** Database / Persistence Architecture
-**Date:** 2026-08-31
-**Status:** PENDING HUMAN DECISION
+**Date (original):** 2026-08-31
+**Date (revised):** 2026-09-01
+**Status:** APPROVED — Dual-Profile Architecture
 **Depends on:** ADR-001 (APPROVED — Hybrid TypeScript + Optional Python Worker)
-**Hermes Role:** Principal Engineer ONLY
+**Role:** Principal Engineer ONLY
 **Trader Brain:** DISABLED
-**Implementation:** NOT STARTED — documentation only
+**Implementation:** NOT YET STARTED — design direction approved; implementation tasks deferred
+
+---
+
+## REVISION HISTORY
+
+| Version | Date | Change |
+|---------|------|--------|
+| 1.0 | 2026-08-31 | Original — PostgreSQL 16 only |
+| 2.0 | 2026-09-01 | Dual-profile architecture — Android/SQLite + Server/PostgreSQL 16 |
+
+### Why This Revision
+
+The original ADR-002 assumed PostgreSQL 16 as the single database profile. Four exhaustive environment-recovery attempts confirmed that PostgreSQL 16 **cannot** run inside the Android/Termux/Ubuntu PRoot environment:
+
+| Attempt | Method | Result |
+|---------|--------|--------|
+| 1 | uDocker pull `postgres:16-alpine` | Hangs/times out — transfer layer broken |
+| 2 | Native Ubuntu apt (`postgresql-16`) | Package absent — Ubuntu 26.04 ports repo only carries 18 |
+| 3 | PGDG apt (`resolute-pgdg`) | 16.15 available but dependency chain broken in PRoot (locales/libicu78/libpq5 conflict) |
+| 4 | Pre-existing binary/container | None found; existing uDocker container (`77eefc09`) is empty alpine root |
+
+**Resolution:** Dual-profile architecture — one VUA system, two deployment profiles.
 
 ---
 
@@ -29,77 +53,82 @@ Inspecting actual repository for persistence mechanisms (from direct file reads)
 | SSE clients | `api.ts` | `sseClients: Response[]` array | Line 31; lost on restart |
 | Exchange clients | `binance.ts` / `bybit.ts` | No persistence; fetch-only + synthetic fallback | Lines 149-229 (synthetic fallback visible) |
 
-### Files on Disk (Not Database)
-
-| File | Purpose | Persistence? |
-|------|---------|-------------|
-| `.env.example` | Config template | Template only |
-| `package.json` | Dependencies | Static |
-| `metadata.json` | AI Studio metadata | Static |
-| `tsconfig.json` | TypeScript config | Static |
-| `vite.config.ts` | Build config | Static |
-
 ### What Exists: Zero Persistence
 
-- **No PostgreSQL instance** (confirmed — no DB directory, no connection strings, no migrations)
+- **No PostgreSQL instance** (confirmed — no DB directory, no connection strings, no migrations applied)
 - **No SQLite file** (confirmed — no `.db`, `.sqlite` files)
+- **No database runtime** in current environment (uDocker pull blocked, native PG16 unavailable, PGDG dep conflict)
 - **No JSON/CSV data files** (confirmed — only static source/config)
 - **No Redis/cache** (confirmed — no Redis config, no cache layer)
-| **No log file persistence** (only console.log, no log rotation or storage) |
+- **No log file persistence** (only console.log, no log rotation or storage)
 - **No audit trail** (risk decisions in memory only)
 - **No historical data store** (backtests use synthetic candles from `generateSyntheticCandles()`)
 - **No event log** (no event sourcing, no append-only records)
 
-### Conclusion — Step 1
-
-**VUA has zero durable persistence.** All trading state, risk decisions, positions, orders, debates, equity, and audit records exist only in process memory. On crash/restart, everything is lost — except the synthetic seed in `memoryLedger.ts`. This is the primary reason INTERNATIONAL AUDIT reports call VUA a "prototype".
-
 ---
 
-## STEP 2 — PERSISTENCE DOMAINS
+## STEP 2 — SUPPORTED DATABASE PROFILES
 
-### Required Domains (Mandatory for Production)
+### PROFILE A — LOCAL / ANDROID
 
-| Domain | Required? | Type | Justification |
-|--------|-----------|------|---------------|
-| System / Config | Required | Authoritative | Risk limits, mode, symbol selection, engine state |
-| Account / Equity | Required | Authoritative | Initial capital, daily PnL, drawdown, equity curve |
-| Exchange / Symbol | Required | Authoritative | Which exchange, which pair — multi-symbol future |
-| Market Data — Candles (HOT) | Required | Historical + Live | Backtesting requires historical; live requires current |
-| Market Data — Ticker (EPHEMERAL) | Ephemeral | Derived | Current price — can be reconstructed from feed |
-| Orders (POSTED / SUBMITTED) | Required | Authoritative | Every submitted order must be durable |
-| Orders — ACK / FILL (EVENT) | Required | Append-only | All acknowledgment events immutable |
-| Fills / Executions | Required | Authoritative | Filled price, quantity, fees, slippage |
-| Positions (OPEN / CLOSED) | Required | Authoritative | Current portfolio — critical for reconciliation |
-| Position Events | Required | Append-only | Updates, SL/TP triggers, trailing stops |
-| Risk Decisions (VETO / APPROVED) | Required | Append-only | Every veto must be auditable; hard veto evidence |
-| Risk Configuration | Required | Authoritative | Config changes with audit trail |
-| Risk Events (Circuit Breaker / Kill Switch) | Required | Append-only | System protection events |
-| Trading Decisions (AI Proposals / CIO Verdicts) | Required | Append-only | Agent debate + synthesis must be traceable |
-| AI Debate / Reasoning Metadata | Required (audit) | Append-only | Full deliberation for learning and compliance |
-| Market Regime (current) | Ephemeral / Derived | Derived | Can be reconstructed from indicators + candles |
-| Regime History | Required (research) | Historical | For backtest validation, pattern analysis |
-| Backtest Runs / Results | Optional (research) | Historical | Not needed for live trading; useful for validation |
-| Paper Trading Events | Required (if active) | Append-only | All paper orders and fills |
-| Live Trading Events | Required (if active) | Append-only | All live orders and fills |
-| Audit Events — General | Required | Append-only | Every significant system event |
-| System Health / Errors | Required | Append-only | For operational monitoring |
+| Field | Value |
+|-------|-------|
+| **Profile ID** | PROFILE-A |
+| **Profile Name** | Local / Android |
+| **Target Environment** | Android / Termux / Ubuntu PRoot |
+| **Database** | SQLite 3 |
+| **ORM** | Prisma (provider: `sqlite`) |
+| **Intended Use** | Single-device development and runtime |
+| **Concurrency** | Single process only |
+| **Persistence Scope** | Device-local only |
+| **Production Deployment** | NOT APPROVED |
 
-### Optional / Derived / Ephemeral (Can Be Reconstructed)
+**When to use Profile A:**
+- Development on Android/Termux device
+- Local testing without a server
+- When PostgreSQL is unavailable in the deployment environment
+- Single-user, single-device scenarios
 
-| Domain | Type | Storage Recommendation |
-|--------|------|------------------------|
-| Real-time ticker | Ephemeral | Cache / Redis (5-min TTL) |
-| Order book (live) | Ephemeral | Cache / Redis (1-min TTL) |
-| Indicator values (current) | Derived | Recompute from candles |
-| Regime classification | Derived | Recompute from indicators |
-| Equity calculations (current) | Derived | Recompute from positions + trades |
+### PROFILE B — SERVER / PRODUCTION
+
+| Field | Value |
+|-------|-------|
+| **Profile ID** | PROFILE-B |
+| **Profile Name** | Server / Production |
+| **Target Environment** | PC / Server / Production Host |
+| **Database** | PostgreSQL 16 |
+| **ORM** | Prisma (provider: `postgresql`) |
+| **Intended Use** | Production persistence, multi-process/server workloads |
+| **Concurrency** | Full concurrent write support |
+| **Persistence Scope** | Server-managed |
+| **Development Deployment** | APPROVED (Docker Compose) |
+
+**When to use Profile B:**
+- Production server deployment
+- Multi-user environments
+- Environments with Docker capability
+- When full PostgreSQL ACID guarantees are required
+
+### Relationship Between Profiles
+
+```
+VUA System
+├── Profile A: Android / Termux / PRoot
+│   └── SQLite (Prisma SQLite provider)
+│
+└── Profile B: Server / Production
+    └── PostgreSQL 16 (Prisma PostgreSQL provider)
+```
+
+**CRITICAL:** SQLite is NOT a drop-in replacement for PostgreSQL. Profile A and Profile B are **separate deployment targets**, not interchangeable at runtime. The application code must NOT attempt to switch between providers dynamically — deployment profile is determined at install time.
 
 ---
 
 ## STEP 3 — SOURCE OF TRUTH
 
 > **Exchange is the authoritative source for externally executed account state (fills, position counts, prices). Database is authoritative for orders, risk decisions, and immutable audit. In-memory is ephemeral cache only. Reconciliation is the mechanism for detecting and resolving discrepancies.**
+
+This authority model is **UNCHANGED** from the original ADR-002 and applies to **both database profiles**.
 
 ### State Type Authority Matrix
 
@@ -137,7 +166,228 @@ For each open position:
 
 ---
 
-## STEP 4 — TRADING STATE MODEL (LIFECYCLE PERSISTENCE)
+## STEP 4 — ORM / DATA ACCESS CONTRACT
+
+### Prisma Multi-Provider Strategy
+
+**Goal:** ONE Prisma schema, two provider targets, zero application-level branching on provider type.
+
+**Implementation approach:**
+
+```prisma
+// schema.prisma — canonical schema
+// Profile A: build with provider = "sqlite"
+// Profile B: build with provider = "postgresql"
+```
+
+**Prisma Client generation:**
+- Profile A: `prisma generate --no-engine` (SQLite uses no native engine in dev)
+- Profile B: `prisma generate` (PostgreSQL native engine)
+
+### DATABASE_URL Strategy
+
+```bash
+# Profile A (SQLite)
+DATABASE_URL="file:./data/vua_dev.db"
+DATABASE_PROFILE="sqlite"  # or detected from DATABASE_URL scheme
+
+# Profile B (PostgreSQL)
+DATABASE_URL="postgresql://postgres:password@localhost:5432/vua_trading"
+DATABASE_PROFILE="postgresql"  # or detected from DATABASE_URL scheme
+```
+
+**Runtime detection:** Prisma Client reads `DATABASE_URL` at startup. The application does NOT inspect provider type — Prisma handles dialect differences internally.
+
+### Schema Compatibility Requirements
+
+The canonical Prisma schema **MUST** be compatible with both SQLite and PostgreSQL providers. This imposes the following constraints:
+
+#### Compatible (works on both)
+
+| Feature | SQLite | PostgreSQL |
+|---------|--------|------------|
+| String / Text | ✓ | ✓ |
+| Int / BigInt | ✓ | ✓ |
+| Float / Decimal | ✓ | ✓ |
+| Boolean | ✓ | ✓ |
+| DateTime | ✓ | ✓ |
+| UUID | ✓ (via extension) | ✓ (native) |
+| JSON (stored as text) | ✓ (SQLite JSON functions) | ✓ (JSONB) |
+| ENUM (stored as string) | ✓ (via String + validation) | ✓ (native) |
+| Default values (scalar) | ✓ | ✓ |
+| Primary keys (UUID, auto) | ✓ | ✓ |
+| Indexes | ✓ | ✓ |
+| Foreign keys | ✓ | ✓ |
+| Many-to-many relations | ✓ | ✓ |
+| Unique constraints | ✓ | ✓ |
+
+#### Incompatible / Provider-Specific
+
+| Feature | SQLite | PostgreSQL | Resolution |
+|---------|--------|------------|------------|
+| `Decimal` type | Approximated (no exact decimal) | Exact via NUMERIC | Use `Decimal` Prisma type; cast at read time |
+| `Unsupported` annotations | Not supported | Supported | Avoid PostgreSQL-specific types |
+| `cockroachdb` provider | N/A | N/A | Not used |
+| `Array` type | Not natively supported | Supported | Store as JSON string |
+| `Bit` / `ByteA` | Supported differently | Supported differently | Use `Bytes` with appropriate mapping |
+| ` pg-extension` features | N/A | e.g., `uuid-ossp` | Avoid unless Profile-B only |
+| Transaction isolation levels | Limited (`IMMEDIATE`/`EXCLUSIVE`) | Full serializable | Design transactions for SQLite's weakest level |
+| Full-text search | FTS5 (SQLite-specific) | `tsvector` | Use app-level search or provider-conditional query |
+| `RETURNING` clause | Limited | Full | Use `select` after insert instead |
+| `ON CONFLICT` (upsert) | `INSERT OR REPLACE` | `ON CONFLICT DO UPDATE` | Use Prisma upsert (handled by adapter) |
+| Connection pooling | None (single file lock) | Required (`pgBouncer`/`Prisma Data Proxy`) | Profile A: single connection; Profile B: pool |
+
+#### Schema Rules for Dual-Provider Compatibility
+
+1. **No `@db.Text`, `@db.Integer` etc.** — use generic Prisma types only
+2. **No PostgreSQL-specific `@default(dbgenerated(...))`** — use portable defaults
+3. **No `cockroachdb` or other non-standard providers**
+4. **Decimal precision** — accept that SQLite uses floating-point approximation; do not rely on sub-decimal precision for financial calculations
+5. **No `CREATE EXTENSION`** in migrations unless wrapped in provider-conditional SQL
+6. **No `UNIQUE` index using `USING hash`** — omit index method (let provider decide)
+
+### Migration Strategy
+
+| Profile | Migration Command | Notes |
+|---------|-------------------|-------|
+| Profile A (SQLite) | `prisma migrate dev` with SQLite provider | Creates `.db` file; migrations via SQLITE migrations |
+| Profile B (PostgreSQL) | `prisma migrate deploy` with PostgreSQL provider | Docker-based production; applies via `npx prisma migrate deploy` |
+
+**Canonical migration:** The `prisma/migrations/` directory is **shared** between profiles. Only schema-compatible migrations are acceptable. Provider-specific migration SQL must be wrapped in conditional blocks.
+
+**Migration file naming convention:** `YYYYMMDDHHMMSS_profile_name.sql`
+
+### Transaction Semantics
+
+| Aspect | Profile A (SQLite) | Profile B (PostgreSQL) |
+|--------|--------------------|-----------------------|
+| ACID guarantees | Full for single connection | Full with full isolation levels |
+| Default isolation | `SERIALIZABLE` (SQLite) | `READ COMMITTED` (PostgreSQL default) |
+| Write concurrency | Single writer (file lock) | Full concurrent writers |
+| Transaction timeout | No explicit timeout (relies on OS) | `idle_in_transaction_session_timeout` configurable |
+| Savepoints | Supported | Supported |
+| advisory locks | Not available | Available |
+| LISTEN/NOTIFY | Not available | Available (for real-time events) |
+
+**Design implication:** VUA transactions must be **short and atomic** to work well on both providers. No long-running transactions.
+
+### Concurrency Implications
+
+| Aspect | Profile A (SQLite) | Profile B (PostgreSQL) |
+|--------|--------------------|-----------------------|
+| Reader concurrency | Unlimited reads | MVCC (snapshot isolation) |
+| Writer concurrency | Single writer (EXCLUSIVE lock) | Full concurrent writes |
+| Connection limit | 1 writer | Configurable (default 100) |
+| Read replicas | Not available | Available |
+| Failover | Not available | Available (with connection pooler) |
+
+**Profile A limitation:** Only ONE write can occur at a time. On Android, this is acceptable (single process). On server, use Profile B for concurrent trading engines.
+
+### Locking Implications
+
+| Scenario | Profile A | Profile B |
+|---------|-----------|-----------|
+| Two simultaneous writes | Second blocked until first commits | Both proceed with row locks |
+| Long-running transaction | Blocks all writers | Only blocks conflicting rows |
+| Connection exhaustion | N/A (single file) | Pool exhaustion → queuing |
+
+### Indexing Differences
+
+| Feature | SQLite | PostgreSQL |
+|---------|--------|------------|
+| Index types | B-tree (default), R-tree, FTS5 | B-tree, Hash, GIN, GiST, BRIN |
+| Partial indexes | Supported | Supported |
+| Expression indexes | Supported | Supported |
+| Covering indexes | SQLite-specific optimization | PostgreSQL can use covering indexes |
+| `INCLUDE` columns | Not a separate concept | Supported (INCLUDE in B-tree) |
+
+**Recommendation:** Use only B-tree indexes (default) to ensure portability.
+
+### Data Type Differences
+
+| Prisma Type | SQLite storage | PostgreSQL storage |
+|-------------|----------------|--------------------|
+| `String` | TEXT | VARCHAR(n) or TEXT |
+| `Int` | INTEGER | INTEGER |
+| `BigInt` | INTEGER (64-bit) | BIGINT |
+| `Float` | REAL (IEEE 754) | DOUBLE PRECISION |
+| `Decimal` | REAL (no exact decimal) | NUMERIC (exact) |
+| `Boolean` | INTEGER (0/1) | BOOLEAN |
+| `DateTime` | TEXT (ISO 8601) | TIMESTAMPTZ |
+| `Json` | TEXT (JSON string) | JSONB |
+| `Bytes` | BLOB | BYTEA |
+| `Uuid` | TEXT | UUID |
+
+**Decimal precision note:** For financial calculations (position size, PnL, equity), Profile A uses floating-point approximation. Use `Decimal.js` or similar at the application layer for precise calculations, and round to 8 decimal places before storing.
+
+### Timestamp Behavior
+
+| Aspect | Profile A | Profile B |
+|--------|-----------|-----------|
+| Timezone | Local / UTC stored as string | TIMESTAMPTZ (UTC stored) |
+| Precision | Seconds (default) | Microseconds |
+| NOW() | `datetime('now')` | `NOW()` |
+| Timezone conversion | Application layer | Database level |
+
+**Recommendation:** Always store and transmit timestamps as UTC. Convert to local time in the application layer.
+
+### Foreign Key Behavior
+
+| Aspect | Profile A (SQLite) | Profile B (PostgreSQL) |
+|--------|--------------------|-----------------------|
+| FK enforcement | OFF by default; enable via `PRAGMA foreign_keys = ON` | ON by default |
+| FK on UPDATE/DELETE | Supported (all actions) | Supported (all actions) |
+| Self-referential FK | Supported | Supported |
+| Circular FK | Not recommended | Supported with deferred constraints |
+
+**Prisma schema note:** Prisma manages FK behavior through its adapter. Always use `relationMode` in schema for SQLite to avoid Prisma's reliance on `FOREIGN_KEY_CONSTRAINTS`.
+
+```prisma
+// For SQLite compatibility:
+model Order {
+  id        String   @id @default(uuid())
+  fills     Fill[]
+  // ...
+}
+
+// In schema.prisma (SQLite profile), add:
+generator client {
+  provider        = "prisma-client-js"
+  // relationMode = "prisma" // Not needed with recent Prisma versions
+}
+```
+
+### JSON/Data-Type Differences
+
+| Aspect | Profile A | Profile B |
+|--------|-----------|-----------|
+| JSON storage | TEXT column | JSONB column |
+| JSON validation | None (raw text) | Schema validation available |
+| JSON path queries | String matching | Full JSONPath support |
+| JSON indexing | Not available | GIN index on JSONB |
+
+**Recommendation:** Keep JSON fields small and primarily for read-only structured data (e.g., array of check results). Use typed columns for queryable fields.
+
+### Numeric/Decimal Handling
+
+| Aspect | Profile A (SQLite) | Profile B (PostgreSQL) |
+|--------|--------------------|-----------------------|
+| DECIMAL storage | Approximated (IEEE 754 double) | Exact via NUMERIC |
+| Precision guaranteed | NO (floating-point) | YES (NUMERIC) |
+| Rounding error | Possible | None |
+
+**VUA-specific implications:**
+- `position_size_usd`, `entry_price`, `liquidation_price` stored as Decimal/String
+- Application layer (TypeScript) performs precise math using `decimal.js`
+- Rounds to 8 decimal places before DB storage
+- Profile B uses NUMERIC(20,8) for full precision
+- Profile A uses REAL — accept ±0.00000001 rounding for local dev only
+
+---
+
+## STEP 5 — TRADING STATE MODEL (LIFECYCLE PERSISTENCE)
+
+Identical to original ADR-002. Dual-database profiles do not change the trading lifecycle model.
 
 ### Signal → Decision → Execution → Reconciliation
 
@@ -188,24 +438,11 @@ RECONCILIATION (Periodic / Every Tick)
   → Memory state rebuilt from DB after reconciliation
 ```
 
-### What Must Be Saved at Each Transition
-
-| Transition | DB Table(s) | Immutable? | Event ID |
-|------------|-------------|------------|----------|
-| Decision made | `decisions` | Yes (audit) | `evt_decision_{timestamp}_{id}` |
-| Risk veto/approval | `risk_decisions` | Yes (audit — never overwritten) | `evt_risk_{timestamp}_{order_id}` |
-| Order submitted | `orders` + `order_events` | Status updates OK | `evt_order_submitted_{id}` |
-| Acknowledgment | `orders` + `order_events` | Status updates OK | `evt_order_ack_{id}` |
-| Partial fill | `fills` + `positions` + `order_events` | Fill record immutable | `evt_fill_partial_{id}` |
-| Full fill / close | `fills` + `orders` + `positions` + `position_events` | Fill/close immutable | `evt_fill_full_{id}` |
-| Reconciliation | `reconciliation_events` | Yes (append-only) | `evt_reconcile_{timestamp}` |
-| Kill switch | `system_events` + `positions` (close all) | Event immutable | `evt_kill_switch_{timestamp}` |
-
 ---
 
-## STEP 5 — EVENT LOG (APPEND-ONLY)
+## STEP 6 — EVENT LOG (APPEND-ONLY)
 
-### Design Principle
+Identical to original ADR-002. Applies to both database profiles.
 
 > **Audit logs must be append-only. They must never be updated or deleted.**
 
@@ -218,7 +455,7 @@ RECONCILIATION (Periodic / Every Tick)
 | **Order filled (partial)** | `fill_events` | Yes | Fill sequence |
 | **Order filled (full)** | `fill_events` + `close_events` | Yes | Close sequence |
 | **Position opened** | `position_events` | Yes | Open sequence |
-| **Position updated (price)** | `position_events` (price update) | Status updates OK; event record yes | Tick-based |
+| **Position updated (price)** | `position_events` | Status updates OK; event record yes | Tick-based |
 | **Position SL triggered** | `position_events` + `fill_events` | Yes | Trigger sequence |
 | **Position TP triggered** | `position_events` + `fill_events` | Yes | Trigger sequence |
 | **Risk veto** | `risk_decisions` | Yes — NEVER OVERWRITTEN | Veto sequence |
@@ -230,29 +467,11 @@ RECONCILIATION (Periodic / Every Tick)
 | **Circuit breaker trip** | `system_events` | Yes | System event sequence |
 | **System error / failure** | `system_events` + `error_events` | Yes | Error sequence |
 
-### Event Ordering Requirements
-
-- **Within a single order:** Events ordered by time + sequence number
-- **Within a single position:** Events ordered by time + sequence number
-- **Cross-order:** Not required to be globally ordered (independent positions)
-- **Audit queries:** Must replay full sequence for any order/position
-
-### What May Be Updated (Not Immutable)
-
-- `orders.status` — SUBMITTED → ACKNOWLEDGED → PARTIALLY_FILLED → FILLED → CANCELLED
-- `orders.filled_quantity` — updates with each partial fill
-- `orders.avg_price` — updates with new fills
-- `positions.current_price` — updates with ticker (ephemeral, reconstructed from data)
-- `positions.unrealized_pnl` — computed from current_price — derived, can be reconstructed
-- `positions.current_quantity` — updates with partial fills
-
-Note: The event records (`fill_events`, `close_events`) remain immutable; only the current-state tables (`orders`, `positions`) are updated.
-
 ---
 
-## STEP 6 — IDEMPOTENCY
+## STEP 7 — IDEMPOTENCY
 
-### Mandatory Protection
+Identical to original ADR-002. Applies to both database profiles.
 
 > A trading system without idempotency will duplicate orders, duplicate fills, and corrupt position state.
 
@@ -281,496 +500,367 @@ Rule 5: If order canceled but DB not updated: reconciliation detects; DB correct
 
 ---
 
-## STEP 7 — FAILURE & RECOVERY
+## STEP 8 — FAILURE & RECOVERY
 
-### Failure Scenarios (Mandatory Design)
+Identical to original ADR-002 with additional Profile-A-specific notes.
 
-| Scenario | Detection | Recovery | Source of Truth | Safe Behavior | Audit Record |
-|----------|-----------|----------|-----------------|---------------|--------------|
-| **1. VUA crashes** | Process exit / health check fails | Restart; replay DB events; rebuild positions from DB; reconnect exchange | DB + Exchange (reconcile) | No trading until reconciliation complete; kill switch remains available | System error event |
-| **2. DB crashes** | Connection failure / timeout | Restart DB; reconnect; verify state; if DB lost: restore from backup; if unrecoverable: reconstruct from exchange + audit | Exchange (if DB lost) | Trading halted until DB restored; no orders without DB | System failure event |
-| **3. Exchange disconnects** | WebSocket disconnect / REST timeout | Retry with backoff; reconnection; if persistent: error logged; paper trading continues; live stops | Memory + DB (last known state) | Live trading stops; paper can continue with synthetic only if explicitly flagged | Exchange disconnect event |
-| **4. WebSocket disconnects** | Connection state change | Auto-reconnect; fetch REST snapshot (current ticker); rebuild position state from DB open positions + fill_events; reconnect WebSocket; validate continuity | DB + Exchange REST | No execution during reconnect; resume after reconciliation | WebSocket event + reconciliation event |
-| **5. REST timeout** | Timeout event | Retry with exponential backoff; same order ID (idempotent) | DB + Exchange | No duplicate orders (idempotency) | REST timeout event |
-| **6. Order submitted, ack lost** | No acknowledgment within timeout | Query DB; query exchange by `client_order_id`; if exchange has order: update DB; if NOT FOUND + idempotency satisfied (same `client_order_id`, no DB fill events, status ≠ FILLED): SAFE RETRY with same ID; else: RECONCILE / hold | Exchange (query) | Retry ONLY IF idempotency conditions met; never submit duplicate | Order event + reconciliation if discrepancy |
-| **7. Fill received, DB write fails** | DB error on write | Retry DB write; if persistent failure: log error; alert; hold position update until DB recovers | Exchange (fill is real) | Position NOT updated in memory until DB confirms; exchange fill is authoritative | Fill event + error event |
-| **8. DB write succeeds, process crashes** | Process crash after DB commit | Restart; replay from DB; position state correct (DB saved) | DB | No data loss (DB committed); memory rebuilt | System event |
-| **9. Restart with open position** | Startup check | Query DB for open positions; reconnect exchange; reconcile; rebuild memory | DB + Exchange | No new orders until reconciliation complete | Startup event |
-| **10. DB vs Exchange disagree** | Reconciliation timeout / mismatch | Reconcile event logged; DB corrected if exchange authoritative; alert fired | Exchange (for fills/position) / DB (for orders/decisions) | If mass discrepancy: kill switch available; no new orders until resolved | Reconciliation event |
+| Scenario | Profile A Behavior | Profile B Behavior | Notes |
+|----------|--------------------|--------------------|-------|
+| VUA crashes | Restart; replay DB events; rebuild positions | Same | Both profiles support replay |
+| DB corruption | Restore from last backup; replay WAL | pg_dump restore | Profile A: copy .db file; Profile B: pg_restore |
+| DB locked (Profile A) | OS-level file lock; wait or fail with clear error | N/A | Profile A single-writer constraint |
+| Write failure (Profile A) | `SQLITE_BUSY` → retry with backoff; alert after 3 failures | N/A | Profile A only |
+| Connection loss (Profile B) | N/A | Reconnect via pool; retry transaction | Profile B only |
+| Exchange disconnects | Paper continues; live stops (same as original) | Same | No change |
+
+**Profile A specific safety rules:**
+- SQLite file lock must be respected — never open DB from two processes simultaneously
+- Use `PRAGMA journal_mode=WAL` for better concurrency on read-heavy workloads
+- Set `PRAGMA synchronous=FULL` to ensure durability (at cost of write speed)
+- Accept that under Android under heavy memory pressure, the DB file may be corrupted — have backup strategy
 
 ---
 
-## STEP 8 — SCHEMA ARCHITECTURE (CONCEPTUAL)
+## STEP 9 — DATA MODEL AUDIT
 
-### Design Note
+### Entity Preservation (Both Profiles)
 
-> **No database created. No migration files written. This is conceptual design only.**
+The original 11-entity schema is preserved identically. Both SQLite and PostgreSQL can represent:
 
-### Entities (Conceptual Schema — NT — Not Yet Implemented)
+| Entity | Profile A (SQLite) | Profile B (PostgreSQL) | Compatible |
+|--------|-------------------|------------------------|------------|
+| ORDERS | ✓ | ✓ | ✓ |
+| FILL_EVENTS | ✓ | ✓ | ✓ |
+| POSITIONS | ✓ | ✓ | ✓ |
+| POSITION_EVENTS | ✓ | ✓ | ✓ |
+| RISK_DECISIONS | ✓ | ✓ | ✓ |
+| DECISIONS | ✓ | ✓ | ✓ |
+| RECONCILIATION_EVENTS | ✓ | ✓ | ✓ |
+| SYSTEM_EVENTS | ✓ | ✓ | ✓ |
+| CONFIG_HISTORY | ✓ | ✓ | ✓ |
+| MARKET_DATA_CANDLES | ✓ | ✓ | ✓ (performance warning for Profile A) |
+| ACCOUNTS | ✓ | ✓ | ✓ |
 
-```
-SYSTEM_CONFIG
-├── id (PK, UUID)
-├── version (INT, schema version)
-├── created_at (TIMESTAMP)
-├── updated_at (TIMESTAMP)
-├── mode (ENUM: PAPER, LIVE, TESTNET)
-├── selected_exchange (ENUM: BINANCE, BYBIT)
-├── selected_symbol (STRING)
-├── initial_capital_usd (DECIMAL(12,2))
-├── autonomous_cycle_seconds (INT)
-├── auto_trading_enabled (BOOLEAN)
-├── engine_running (BOOLEAN)
-├── kill_switch_engaged (BOOLEAN)
-└── UNIQUE (mode, selected_exchange, selected_symbol) (if single-active)
+### ORDER → FILL (0..N) Relationship
 
-ACCOUNTS
-├── id (PK, UUID)
-├── initial_capital_usd (DECIMAL(12,2))
-├── current_equity_usd (DECIMAL(12,4))
-├── high_water_mark_usd (DECIMAL(12,4))
-├── max_drawdown_percent (DECIMAL(8,4))
-├── created_at
-├── updated_at
-└── UNIQUE (id)
+**PRESERVED.** This is the approved model. Do NOT introduce ORDER → POSITION (1:1) as a replacement. Both profiles enforce this correctly.
 
-ORDERS
-├── id (PK, UUID — VUA-generated)
-├── client_order_id (STRING, UNIQUE with exchange + symbol) — idempotency
-├── exchange_order_id (STRING, NULLABLE — from exchange)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── side (ENUM: BUY, SELL)
-├── type (ENUM: MARKET, LIMIT, STOP_LOSS, TAKE_PROFIT)
-├── price (DECIMAL(16,8))
-├── quantity (DECIMAL(18,4))
-├── cost_usd (DECIMAL(12,2))
-├── leverage (DECIMAL(4,2))
-├── status (ENUM: SUBMITTED, ACKNOWLEDGED, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED)
-├── filled_quantity (DECIMAL(18,4), default 0)
-├── avg_price (DECIMAL(16,8))
-├── fee_usd (DECIMAL(12,2))
-├── slippage_percent (DECIMAL(8,4))
-├── created_at (TIMESTAMP)
-├── filled_at (TIMESTAMP, NULLABLE)
-├── updated_at (TIMESTAMP)
-├── hypothesis_id (UUID, FK to DECISIONS)
-└── UNIQUE (client_order_id, exchange, symbol)
+### Additional Profile-A Data Model Notes
 
-FILL_EVENTS (Append-Only)
-├── id (PK, UUID — event ID)
-├── order_id (UUID, FK orders.id)
-├── exchange_fill_id (STRING, NULLABLE — from exchange)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── side (ENUM)
-├── fill_quantity (DECIMAL(18,4))
-├── fill_price (DECIMAL(16,8))
-├── fee_usd (DECIMAL(12,2))
-├── timestamp (TIMESTAMP) — event time
-├── event_sequence (INT) — per order sequence
-└── UNIQUE (exchange_fill_id, symbol, timestamp) — prevent duplicate fills
+- WAL mode for better write concurrency on reads
+- `PRAGMA foreign_keys = ON` required (disabled by default in SQLite)
+- `PRAGMA journal_mode = WAL` recommended for Profile A
+- `PRAGMA synchronous = FULL` recommended for Profile A (durability over speed)
 
-POSITIONS (Authoritative — Current State)
-├── id (PK, UUID)
-├── order_id (UUID, FK orders.id — origin)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── side (ENUM: LONG, SHORT)
-├── entry_price (DECIMAL(16,8))
-├── current_price (DECIMAL(16,8))
-├── quantity (DECIMAL(18,4))
-├── leverage (DECIMAL(4,2))
-├── initial_margin_usd (DECIMAL(12,2))
-├── unrealized_pnl_usd (DECIMAL(12,2))
-├── unrealized_pnl_percent (DECIMAL(8,2))
-├── stop_loss_price (DECIMAL(16,8))
-├── trailing_stop_price (DECIMAL(16,8), NULLABLE)
-├── take_profit_1 (DECIMAL(16,8))
-├── take_profit_2 (DECIMAL(16,8))
-├── take_profit_3 (DECIMAL(16,8))
-├── liquidation_price (DECIMAL(16,8))
-├── created_at
-├── updated_at (from ticker updates — not event)
-├── status (ENUM: OPEN, CLOSED, LIQUIDATED) — updated when closed
-└── UNIQUE (summary — per open position per symbol/exchange/side)
+---
 
-POSITION_EVENTS (Append-Only)
-├── id (PK, UUID)
-├── position_id (UUID, FK positions.id)
-├── event_type (ENUM: OPENED, PRICE_UPDATE, SL_TRIGGERED, TP1_TRIGGERED, TP2_TRIGGERED, TP3_TRIGGERED, CLOSED_MANUAL, CLOSED_CIRCUIT_BREAKER, CLOSED_KILL_SWITCH)
-├── price (DECIMAL(16,8)) — price at event time
-├── unrealized_pnl_usd (DECIMAL(12,2))
-├── timestamp
-├── event_sequence (INT) — per position
-└── UNIQUE (position_id, event_sequence)
+## STEP 10 — SQLITE LIMITATION POLICY
 
-DECISIONS (AI Proposals — Audit)
-├── id (PK, UUID)
-├── snapshot_hash (STRING) — hash of market data at decision time
-├── symbol (STRING)
-├── exchange (ENUM)
-├── timestamp
-├── macro_analyst_verdict (STRING)
-├── technical_strategist_verdict (STRING)
-├── contrarian_skeptic_verdict (STRING)
-├── risk_officer_verdict (STRING)
-├── cio_synthesizer_verdict (STRING)
-├── cio_final_verdict (ENUM: PROPOSE_LONG, PROPOSE_SHORT, NO_TRADE)
-├── confidence_score (DECIMAL(4,2))
-├── edge_probability (DECIMAL(4,2))
-├── synthesis_rationale (TEXT)
-├── trade_hypothesis_json (JSONB) — full hypothesis if proposed
-├── engine_mode (ENUM: NEURAL_GEMINI, QUANTITATIVE_FALLBACK)
-├── created_at
-└── UNIQUE (id)
+> **SQLite is NOT equivalent to PostgreSQL. Profile A is LOCAL/SINGLE-DEVICE. It is NOT a production database.**
 
-RISK_DECISIONS (Hard Veto — Audit — NEVER OVERWRITTEN)
-├── id (PK, UUID — event ID)
-├── decision_id (UUID, FK decisions.id — if linked to trade attempt)
-├── order_id (UUID, FK orders.id — if order attempted)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── approved (BOOLEAN)
-├── veto_reason (TEXT, NULLABLE — if rejected)
-├── checks_passed (JSONB) — array of check results
-├── max_allowed_risk_usd (DECIMAL(12,2))
-├── recommended_position_size_usd (DECIMAL(12,2))
-├── recommended_leverage (DECIMAL(4,2))
-├── estimated_liquidation_price (DECIMAL(16,8))
-├── kelly_fraction (DECIMAL(8,4))
-├── circuit_breaker_status (STRING)
-├── timestamp (TIMESTAMP) — veto time
-└── UNIQUE (id) — append-only
+### Operational Boundaries for Profile A
 
-CONFIG_HISTORY (Configuration Changes — Audit)
-├── id (PK, UUID — event ID, append-only)
-├── config_type (ENUM: RISK, ENGINE, MARKET)
-├── previous_config_json (JSONB)
-├── new_config_json (JSONB)
-├── changed_by (STRING — user/system identifier)
-├── timestamp (TIMESTAMP)
-└── UNIQUE (id)
+| Scenario | Profile A Behavior | Acceptable |
+|----------|--------------------|------------|
+| Multi-node deployment | NOT SUPPORTED — single file DB | ✗ |
+| High-concurrency writes | NOT SUPPORTED — single writer | ✗ |
+| Concurrent reads from multiple processes | Limited (1 reader blocks WAL writer) | △ |
+| Distributed database | NOT SUPPORTED | ✗ |
+| Automated failover | NOT AVAILABLE | ✗ |
+| Point-in-time recovery | Manual (copy .db file) | △ |
+| Streaming replication | NOT AVAILABLE | ✗ |
+| Connection from multiple hosts | NOT SUPPORTED (file on single device) | ✗ |
+| Production trading server | NOT APPROVED for Profile A | ✗ |
+| Android local dev/testing | APPROVED for Profile A | ✓ |
+| Single-process paper trading | APPROVED for Profile A | ✓ |
+| Local persistence for learning | APPROVED for Profile A | ✓ |
 
-RECONCILIATION_EVENTS (Append-Only)
-├── id (PK, UUID)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── event_type (ENUM: POSITION_MISMATCH, ORDER_MISMATCH, FILL_MISMATCH, PRICE_ANOMALY)
-├── db_state_json (JSONB)
-├── exchange_state_json (JSONB)
-├── discrepancy_description (TEXT)
-├── resolution_action (STRING — what was done)
-├── timestamp
-└── UNIQUE (id)
+### When SQLite Becomes Unavailable or Locked
 
-SYSTEM_EVENTS (Append-Only — Health / Errors / Kill Switch)
-├── id (PK, UUID)
-├── event_type (ENUM: ENGINE_START, ENGINE_STOP, KILL_SWITCH_ENGAGE, KILL_SWITCH_DISENGAGE, CIRCUIT_BREAKER_TRIP, DB_CONNECTION_LOST, EXCHANGE_DISCONNECT, WEB_SOCKET_ERROR, REST_TIMEOUT, PROCESS_CRASH, DATA_QUALITY_ERROR)
-├── description (TEXT)
-├── severity (ENUM: INFO, WARNING, CRITICAL)
-├── timestamp
-└── UNIQUE (id)
+**Default safety behavior:**
 
-MARKET_DATA_CANDLES (HOT — Recent) / COLD — Archive
-├── id (PK, UUID)
-├── symbol (STRING)
-├── exchange (ENUM)
-├── interval (STRING) — 1m, 5m, 15m, 1h, 4h, 1d
-├── open (DECIMAL(16,8))
-├── high (DECIMAL(16,8))
-├── low (DECIMAL(16,8))
-├── close (DECIMAL(16,8))
-├── volume (DECIMAL(18,4))
-├── timestamp (TIMESTAMP) — candle time
-├── ingested_at (TIMESTAMP)
-└── UNIQUE (symbol, exchange, interval, timestamp)
+1. **SAFE:** VUA enters safe mode — stops trading, preserves in-memory state
+2. **PAUSE:** No new orders, no position updates from trading logic
+3. **RECOVER:** Log error, attempt DB reconnect with exponential backoff
+4. **ALERT:** Send notification to operator
 
-### Relationships (Conceptual)
+**Never:**
+- `TRADE ANYWAY` when DB is unavailable
+- Ignore `SQLITE_BUSY` or lock errors silently
+- Continue trading with stale in-memory state
 
-```
-CONFIG (0-1) → SYSTEM_CONFIG
-  └── CONFIG_HISTORY (1-N, append-only, FK to config type + timestamp)
+### SQLite WAL Mode Implications
 
-DECISION (1) → RISK_DECISION (0-1, FK decision_id) — risk veto linked to decision
-DECISION (1) → ORDER (0-1, FK hypothesis_id) — if decision produces order
-DECISION (1) → POSITION (0-1, via order) — if filled
+- WAL mode allows one writer AND multiple concurrent readers
+- Checkpoint happens automatically or on demand
+- WAL file grows if not checkpointed — monitor and periodically checkpoint
+- Under Android low-storage conditions, WAL can accumulate — set `PRAGMA wal_autocheckpoint=1000`
 
-ORDER (1) → FILL_EVENTS (0-N, FK order_id, append-only)
-ORDER (1) → ORDER_EVENTS (0-N, FK order_id, append-only, sequence)
-ORDER (1) → POSITION (0-1, if filled — via fill)
+---
 
-POSITION (1) → POSITION_EVENTS (0-N, FK position_id, append-only)
-POSITION (1) → RECONCILIATION_EVENTS (0-N, FK symbol/exchange, not direct)
+## STEP 11 — POSTGRESQL 16 POLICY
 
-SYSTEM_EVENTS (independent — system-level, not per-trade)
-RECONCILIATION_EVENTS (independent — per symbol/exchange check)
+**UNCHANGED from original ADR-002.**
+
+PostgreSQL 16 remains the canonical **SERVER / PRODUCTION** database profile.
+
+- Do NOT downgrade the production database specification because Android cannot run PostgreSQL 16
+- Profile A (SQLite) is a **local development profile**, not a production replacement
+- Profile B (PostgreSQL 16) remains the only **production-approved** database profile
+- The Android PostgreSQL blocker is reclassified as:
+
+> **ENVIRONMENT / DEPLOYMENT PROFILE LIMITATION — NOT an architecture failure**
+
+---
+
+## STEP 12 — BACKUP / RECOVERY
+
+### Profile A (SQLite) — Backup / Recovery
+
+**Backup procedure:**
+
+```bash
+# Safe copy procedure (VUA must NOT be writing during backup)
+# 1. Use VACUUM to compact before backup
+# 2. Copy the .db file and WAL (if using WAL mode)
+cp ./data/vua_dev.db ./data/backup/vua_dev_$(date +%Y%m%d_%H%M%S).db
+cp ./data/vua_dev.db-wal ./data/backup/vua_dev_$(date +%Y%m%d_%H%M%S).db-wal
+
+# Or use sqlite3 backup command:
+sqlite3 ./data/vua_dev.db ".backup './data/backup/vua_dev_$(date +%Y%m%d).db'"
 ```
 
----
+**Restore procedure:**
 
-## STEP 9 — DATA RETENTION
+```bash
+# Stop VUA
+# Copy backup to data directory
+cp ./data/backup/vua_dev_YYYYMMDD.db ./data/vua_dev.db
+# If WAL mode: also restore WAL file
+# Start VUA
+```
 
-### Classification
+**Corruption handling:**
+- Detect corruption: `PRAGMA integrity_check;`
+- If corrupted: restore from last known-good backup
+- If no backup: data is lost — this is why backups are mandatory for Profile A
 
-| Class | Definition | Examples | Storage Strategy |
-|-------|-----------|----------|-----------------|
-| **HOT** | Active trading + recent analysis | Open positions, recent orders, current risk config, current market data (last 7 days) | PostgreSQL (fast access) |
-| **WARM** | Completed trades + backtest inputs + regime history | Closed trades (last 2 years), backtest results, 1yr candle history, recent risk audits | PostgreSQL (with partitioning) |
-| **COLD** | Legacy audit + old market data | Closed trades > 2 years, old candles (> 2 years), old debates | Archive / compressed storage / cold tier |
-| **EPHEMERAL** | Reconstructible from other data | Real-time ticker, order book snapshots, current indicator values, current equity display | In-memory / Redis / cache (not durable DB required) |
+**WAL/locking considerations:**
+- WAL file must be included in backup for full durability
+- If VUA crashes while writing: WAL replay recovers to consistent state
+- If both .db and WAL corrupted: data loss — backups are the only protection
 
-### Specific Retention Rules
+### Profile B (PostgreSQL) — Backup / Recovery
 
-| Data Type | Hot | Warm | Cold | Rationale |
-|-----------|-----|------|------|-----------|
-| System config | Yes | — | — | Current config always needed |
-| Open orders / positions | Yes | — | — | Active trading state |
-| Fill events (last 90d) | Yes | Yes (1yr) | Archive (5yr) | Audit requires complete history |
-| Position events | Yes | Yes (1yr) | Archive (5yr) | Audit trail |
-| Risk decisions | Yes | Yes (3yr) | Archive (7yr) | Regulatory audit |
-| Decision / debate records | Yes | Yes (2yr) | Archive (7yr) | Learning + compliance |
-| Market candles (15m, last 30d) | Yes | Yes (1yr) | Archive (5yr) | Backtest + analysis |
-| Backtest results | — | Yes (6mo) | Archive (2yr) | Research only |
-| Audit logs | Yes | Yes (3yr) | Archive (7yr) | Compliance |
+**Backup procedure:**
 
-### PostgreSQL Storage Boundaries (Recommendation)
+```bash
+# pg_dump (logical backup — includes schema and data)
+pg_dump -U postgres -d vua_trading > backup_$(date +%Y%m%d_%H%M%S).sql
 
-- **Market data candles:** Hot = 30 days; Warm = 1 year; Cold = archive after 1 year. Raw tick-level data should not be in PostgreSQL (too large — use TimescaleDB or S3/Parquet for raw feed).
-- **Order/fill/position events:** All must be preserved (audit compliance). Warm storage sufficient with partitioning by date.
-- **Historical candles for backtesting:** Can use TimescaleDB hypertable partitioning or separate archive table.
+# pg_basebackup (physical backup — full cluster)
+pg_basebackup -U replication -D /backup/base -Ft -z -P
+```
 
----
+**Restore procedure:**
 
-## STEP 10 — MIGRATION STRATEGY (DOCUMENTATION ONLY — NOT IMPLEMENTED)
+```bash
+# pg_dump restore
+psql -U postgres -d vua_trading < backup_YYYYMMDD_HHMMSS.sql
 
-### Phase 1: Schema Foundation (After ADR-002 Approval)
+# pg_basebackup restore
+pg_restore -d vua_trading ./backup/base.tar.gzd
+```
 
-- Create PostgreSQL database
-- Create schema (tables listed in Step 8)
-- Create migrations framework (Prisma for TypeScript)
-- Create initial seed/default config
-- **No application changes** — schema only
+**Migration version tracking:**
+- Prisma `_prisma_migrations` table tracks applied migrations
+- Verify: `npx prisma migrate status`
+- After restore: run `npx prisma migrate deploy` to ensure migrations are consistent
 
-### Phase 2: Persistence Abstraction
-
-- Add DB connection layer (Prisma client / TypeORM)
-- Add persistence abstraction interface (repository pattern)
-- Modify `executionEngine` to write to DB (orders, positions, trades) — keep in-memory as cache
-- Modify `memoryLedger` to read/write DB (equity, drawdown)
-- **Keep in-memory fast path** — DB is source; memory is cache
-
-### Phase 3: Order / Position Persistence
-
-- Persist submitted orders to DB
-- Persist filled orders + positions
-- Reconnect: on restart, load open positions from DB
-- Reconcile: compare DB vs exchange on startup
-- Add idempotency checks (client_order_id uniqueness)
-
-### Phase 4: Risk Persistence
-
-- Persist risk config to DB (load on startup, save on change)
-- Persist every risk veto to `risk_decisions` (append-only)
-- Add audit endpoint (`GET /api/risk/decisions`)
-- Log config changes to `config_history`
-
-### Phase 5: Event / Audit Persistence
-
-- Add event logging (fill_events, position_events, system_events, reconciliation_events)
-- Add debate logging (`decisions` + `ai_proposals` tables if needed)
-- Add audit endpoint (`GET /api/audit/log` with filters)
-- Ensure append-only (DB-level constraints or logic)
-
-### Phase 6: Reconciliation + Recovery
-
-- Implement reconciliation engine
-- Add recovery logic on restart
-- Test crash scenarios (see Step 7)
-- Add health check endpoint for DB health
-
-### Migration Must Be Reversible / Incremental
-
-- Each phase can rollback independently (DB schema exists; app can revert to memory-only)
-- Phase 2-6 are additive — do not remove existing functionality
-- Phase 1 only creates schema — zero application risk
+**Recovery validation:**
+1. Restore backup to fresh database
+2. Run `npx prisma migrate status` — all migrations should be applied
+3. Query each table — confirm row counts match expected
+4. Run smoke query: `SELECT 1`
 
 ---
 
-## STEP 11 — SECURITY
+## STEP 13 — ACCEPTANCE CRITERIA
 
-### Database Security Requirements (Mandatory)
+### Profile A (SQLite Android) — Acceptance Gate
 
-| Requirement | Implementation | Evidence / Justification |
-|-------------|---------------|------------------------|
-| **No plaintext secrets** | Exchange API keys must NOT be stored in DB unless intentionally in encrypted form with vault-backed retrieval | Current `executionEngine.ts` stores `liveApiCredentials` in memory; DB storage requires vault + encryption |
-| **Least privilege DB user** | App DB user: SELECT, INSERT, UPDATE (on state tables only — NO DROP, NO ALTER unless migration user) | Prevents accidental data loss |
-| **Migration role separate** | Schema changes run with migration-specific credentials | Prevents app from altering schema |
-| **Connection security** | SSL/TLS required for production; localhost allowed for dev | Prevents network interception |
-| **Audit access** | Audit table read-only for app; write only through audit events | Prevents audit tampering |
-| **Sensitive data classification** | Trade data is sensitive; market data is public; config is internal | Access control by table / role |
-| **Backup / encryption** | DB backups encrypted at rest; retention 7 years for audit | Compliance |
+| # | Criterion | Validation Method |
+|---|-----------|------------------|
+| A1 | SQLite runtime available | `sqlite3 --version` succeeds |
+| A2 | Prisma connects to SQLite | `npx prisma db execute` succeeds |
+| A3 | Schema applies (SQLite provider) | `npx prisma migrate dev` succeeds |
+| A4 | CRUD works (orders, positions, fills) | Write + read back each entity type |
+| A5 | Transaction works | BEGIN → write → commit → SELECT confirms |
+| A6 | Restart persistence works | Write → stop VUA → start VUA → SELECT confirms data |
+| A7 | Concurrent access behavior understood | Document expected behavior (single-writer constraint) |
+| A8 | Backup/restore verified | Backup → corrupt DB → restore → data matches |
+| A9 | VUA restart does not lose persisted state | Full restart test with trading state |
+| A10 | SQLite limitations documented | No production use on Profile A |
 
-### Secret Management — Exchange API Keys
+### Profile B (PostgreSQL Server) — Acceptance Gate
 
-> **DO NOT store exchange API keys in PostgreSQL plaintext records.**
+| # | Criterion | Validation Method |
+|---|-----------|------------------|
+| B1 | PostgreSQL 16 runtime available | `postgres --version` = 16.x |
+| B2 | PostgreSQL starts (no systemd) | Manual `pg_ctl start` succeeds |
+| B3 | Port 5432 reachable | `pg_isready -h localhost -p 5432` succeeds |
+| B4 | Prisma connects | `npx prisma db execute` succeeds |
+| B5 | Migration applies | `npx prisma migrate deploy` succeeds |
+| B6 | Schema applies (11 entities) | `\dt` confirms all tables |
+| B7 | Transaction works | BEGIN → write → commit → SELECT confirms |
+| B8 | Concurrency validated | Multiple concurrent connections tested |
+| B9 | Persistence survives restart | Write → `pg_ctl stop` → `pg_ctl start` → data present |
+| B10 | Backup/restore verified | `pg_dump` → drop DB → restore → data matches |
+| B11 | Reconciliation data survives restart | Write reconciliation_event → restart → SELECT confirms |
 
-- If DB needs to reference credentials: store reference/key ID only (e.g., `credentials_ref = 'vault-key-01'`), not the secret value
-- Actual secret retrieval from HashiCorp Vault / AWS Secrets Manager / similar
-- `executionEngine.setCredentials()` should retrieve from vault, not DB
-- DB stores: `has_key` boolean (from `getCredentialsStatus`), `testnet` boolean — never `api_key` string
-
----
-
-## STEP 12 — PERFORMANCE
-
-### Expected Bottlenecks (Realistic — Not Premature Optimization)
-
-| Bottleneck | Severity | Mitigation |
-|-----------|----------|------------|
-| **Order/position writes during active trading** | Medium | Batch updates; use transactions; index on order_id, symbol, timestamp |
-| **Reconciliation every tick (3s)** | Low-Medium | Reconciliation should query DB + exchange; use indexed queries on open positions only (not entire table) |
-| **Market data ingestion (candles)** | Medium | Use TimescaleDB or partition by date; insert in batches; separate table from trade state |
-| **Audit query (large history)** | Low | Index on timestamp; paginate; archive old data |
-| **Backtest queries (historical)** | Low | Backtests are research — can use read replica or separate DB |
-
-### Index Recommendations (Conceptual — Not Created)
-
-| Table / Query Pattern | Index Needed |
-|----------------------|-------------|
-| `orders` by `symbol` + `exchange` + `status` | Composite index |
-| `orders` by `client_order_id` | Unique index (idempotency) |
-| `fill_events` by `order_id` | Index |
-| `fill_events` by `timestamp` | Index (time-series queries) |
-| `positions` by `symbol` + `exchange` + `status` | Composite (open positions query) |
-| `risk_decisions` by `timestamp` | Index (audit time-range) |
-| `system_events` by `event_type` + `timestamp` | Index (health queries) |
-| `market_data_candles` by `symbol` + `interval` + `timestamp` | Composite (time-series) + partition key |
+**Both gates must pass for their respective profiles. Profile A passing does not imply Profile B is validated, and vice versa.**
 
 ---
 
-## STEP 13 — DATABASE TECHNOLOGY VALIDATION
+## STEP 14 — GAP ANALYSIS
 
-### PostgreSQL Assessment (Against Requirements)
+### A. Existing ADR-002 Assumptions That Remain VALID
 
-| Requirement | PostgreSQL Capability | Fit |
-|-------------|----------------------|-----|
-| Reliability | ACID transactions, WAL, point-in-time recovery | Excellent |
-| Transactions | Full ACID; serializable isolation | Excellent |
-| Consistency | Strong consistency; foreign keys; constraints | Excellent |
-| Relational trading state | Tables with FKs, unique constraints — perfect for orders/positions | Excellent |
-| Event storage | Append-only tables; sequence IDs; time-series partitioning | Excellent |
-| Analytics | CTEs, window functions, aggregates, indexing | Excellent |
-| Operational simplicity | Mature; Docker; Prisma/TypeORM support | Strong |
-| TypeScript compatibility | Prisma (recommended), TypeORM, pg | Excellent |
-| Future Python compatibility | SQLAlchemy, psycopg2, Alembic | Excellent |
-| WebSocket / real-time | Not native (needs separate service) | Good (DB is storage, not transport) |
+| Assumption | Status | Notes |
+|-----------|--------|-------|
+| Zero current persistence | ✓ VALID | No DB runtime exists |
+| Source-of-truth model (exchange for fills/positions) | ✓ VALID | Applies to both profiles |
+| ORDER → FILL (0..N) relationship | ✓ VALID | Works on both SQLite and PostgreSQL |
+| Append-only event log design | ✓ VALID | Works on both |
+| Idempotency requirements | ✓ VALID | Works on both |
+| Failure/recovery scenarios | ✓ VALID | Profile-A-specific notes added |
+| Schema (11 entities) | ✓ VALID | Both providers can represent all entities |
+| PostgreSQL as production profile | ✓ VALID | Profile B unchanged |
 
-### Verdict
+### B. Existing ADR-002 Assumptions That Must CHANGE
 
-> **PostgreSQL is the correct choice.** It satisfies all requirements: reliability, transactions, consistency, relational state, event storage, analytics, TypeScript/Prisma ecosystem, Python/SQLAlchemy compatibility. No major architectural concern exists.
+| Assumption | Change | Reason |
+|-----------|--------|--------|
+| "PostgreSQL is the database" | Changed to "Two database profiles" | Environment limitation |
+| "No SQLite" | Changed to "SQLite for Profile A" | Android/Termux cannot run PostgreSQL |
+| "DATABASE_URL = postgresql://..." | Changed to conditional URL based on deployment profile | Must support both providers |
+| "Prisma provider = postgresql" | Must support `sqlite` for Profile A | ORM must switch providers |
+| "Migration = `prisma migrate deploy`" | Must support `prisma migrate dev` for Profile A | Different migration paths |
+| Blockers section (no DB = architecture failure) | Reclassified as "deployment profile limitation" | Not an architecture failure |
+
+### C. New SQLite Requirements
+
+| Requirement | Detail | Priority |
+|-------------|--------|----------|
+| Prisma SQLite provider support | Schema must be provider-portable | P0 |
+| SQLite runtime installation | `apt install sqlite3` or bundled | P0 |
+| WAL mode configuration | `PRAGMA journal_mode=WAL` on startup | P0 |
+| FK enforcement enablement | `PRAGMA foreign_keys=ON` on startup | P0 |
+| Single-writer constraint awareness | No multi-process concurrent writes | P0 |
+| File backup procedure | Documented + tested | P1 |
+| Decimal precision acceptance | Document floating-point limitation for Profile A | P1 |
+| Corruption recovery procedure | Document + test | P1 |
+
+### D. PostgreSQL Requirements That Remain UNCHANGED
+
+| Requirement | Status |
+|-------------|--------|
+| PostgreSQL 16 only | UNCHANGED |
+| Docker Compose deployment for server | UNCHANGED |
+| `pg_isready` health check | UNCHANGED |
+| Connection pooling (Prisma Data Proxy or pgBouncer) | UNCHANGED |
+| `prisma migrate deploy` for production | UNCHANGED |
+| Full ACID guarantees | UNCHANGED |
+| NUMERIC type for precise decimals | UNCHANGED |
+
+### E. Cross-Document References That Must Be Updated
+
+| Document | Update Required |
+|----------|----------------|
+| `22-architecture-decisions.md` | ADR-002 status → APPROVED (dual-profile); PostgreSQL = Profile B |
+| `27-vua-master-project-map.md` | ADR-002 → APPROVED; P0-002 → dual-profile design approved; P0-002 environment blocker → reclassified as deployment profile limitation |
+| `24-engineering-dependency-order.md` | ADR-002 → APPROVED; P0-002 continues as dual-profile |
+| `25-master-work-breakdown.md` | TASK-P0-002 → dual-database profiles documented; SQLite added as new requirement |
+| `34-p0-002-postgresql-implementation.md` | Status → APPROVED (design); BLOCKED-ENV status preserved for runtime |
+| `35-p0-002-environment-blocker-checkpoint.md` | Add note: dual-profile architecture resolves environment limitation |
+| `42-p0-002-pc-restoration-runbook.md` | PC path = Profile B (PostgreSQL); Android path = Profile A (SQLite) |
+| `docs/audit/38-p0-003-execution-error-compatibility.md` | May need update if synthetic-fallback removal depends on DB profile |
+| `docs/audit/39-p0-003-no-dummy-acceptance-contract.md` | No changes needed |
+| `docs/audit/40-p0-003-no-dummy-fallback-implementation.md` | No changes needed |
+
+### F. Implementation Work That Must Happen LATER
+
+| Task | Priority | Blocking Dependencies |
+|------|----------|----------------------|
+| TASK-P0-002-A (SQLite Profile A runtime) | P0 | Environment restoration |
+| TASK-P0-002-B (PostgreSQL Profile B runtime) | P0 | Docker-capable environment |
+| TASK-P0-002-C (Prisma dual-provider schema validation) | P0 | Both profile runtimes |
+| TASK-P0-002-D (Dual-profile migration tooling) | P0 | Both profile runtimes |
+| TASK-P0-002-E (SQLite backup/recovery procedure) | P1 | Profile A runtime |
+| TASK-P0-002-F (SQLite corruption detection) | P1 | Profile A runtime |
+
+### G. Risks Introduced by Supporting Two Database Profiles
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Schema drift between profiles | HIGH | Single canonical schema; provider-specific migrations prohibited |
+| Dual testing burden | MEDIUM | Automate both profile test suites |
+| Developer confusion (which profile?) | MEDIUM | Clear deployment documentation per environment |
+| SQLite used in production accidentally | HIGH | Production deployment documentation explicitly forbids Profile A |
+| Decimal precision differences | MEDIUM | Application-layer Decimal.js; document limitation |
+| Different concurrency behavior | MEDIUM | Single-process constraint for Profile A; documented |
+| Backup procedure drift | LOW | Test both backup procedures; document separately |
+| Performance difference masking bugs | LOW | Profile B performance is the reference; Profile A is dev-only |
+
+### H. Risks That Are Explicitly NOT Solved by SQLite
+
+| Risk | SQLite Does NOT Solve This |
+|------|---------------------------|
+| Production-grade ACID guarantees | ✗ — SQLite has limited isolation |
+| Concurrent multi-writer workloads | ✗ — Single writer only |
+| Distributed/multi-node deployment | ✗ — Single file on one device |
+| Automated failover / high availability | ✗ — No HA for Profile A |
+| Production-scale read throughput | ✗ — Not designed for server workloads |
+| Cross-device data access | ✗ — File-based, device-local only |
+| Streaming replication | ✗ — Not available in SQLite |
+| Point-in-time recovery (automated) | △ — Manual only |
+| Connection pooling | ✗ — Not applicable to single-file DB |
 
 ---
 
-## STEP 14 — ADR-002 DECISION (PENDING)
+## STEP 15 — REVISED ADR STATUS
 
-### Decision Record (Not Approved — Waiting for Human)
+### ADR-002: Database Choice — APPROVED (DUAL-PROFILE)
 
-**DECISION ID:** ADR-002
-**QUESTION:** Database / Persistence Architecture for VUA
-**WHY IT MATTERS:** All trading state, audit records, historical data, and reconciliation depend on durable persistence. No persistence = prototype only.
-**CURRENT STATE:** Zero persistence (in-memory only, synthetic fallback, no DB instance, no schema)
-**OPTIONS:**
+**Decision:** Two-profile database architecture.
 
-| Option | Description | Pros | Cons | Impact |
-|--------|-------------|------|------|--------|
-| A: PostgreSQL (recommended) | Single relational DB with Prisma ORM | ACID; audit; time-series; TypeScript/Python compatible; mature | Single point of failure (mitigated by backup) | **RECOMMENDED** |
-| B: PostgreSQL + TimescaleDB | PostgreSQL with time-series extension for candles | Optimized for market data | More complex; only needed if massive candle volume | P2 — can delay |
-| C: PostgreSQL + Redis (cache) | DB for durability + Redis for hot cache | Fast reads for active trading | Added operational component | P1 — useful but not blocking |
-| D: SQLite (embedded) | File-based DB | Zero setup; no server needed | Not production-grade; no concurrent writes; no replication | **REJECTED** — not production-safe |
+| Profile | Database | Provider | Environment | Status |
+|---------|----------|----------|-------------|--------|
+| **Profile A** | SQLite 3 | `prisma` with `sqlite` | Android / Termux / Ubuntu PRoot | APPROVED for local dev |
+| **Profile B** | PostgreSQL 16 | `prisma` with `postgresql` | PC / Server / Production | APPROVED for production |
 
-**RECOMMENDATION:** Option A — PostgreSQL with Prisma ORM (TypeScript). Add TimescaleDB (B) and Redis (C) only when operational needs justify (post-GATE-7).
+**ORM:** Prisma (provider-switching for schema compatibility)
+**Prisma schema:** Canonical single schema, provider-switched at build time
+**DATABASE_URL:** Determined by deployment profile
+**Migration:** Shared migrations directory, provider-compatible SQL only
 
-**DECISION STATUS:** **PENDING HUMAN DECISION** — ADR-002 must NOT be approved by this review.
-
-**DEPENDENCIES:** ADR-001 approved. ADR-002 can now be decided independently.
+**Previous ADR-002 status:** SUPERSEDED by this revision.
+**New ADR-002 status:** APPROVED — Dual-Profile Architecture.
 
 ---
 
-## STEP 15 — DATABASE ACCEPTANCE CRITERIA (CHECKLIST)
+## STEP 16 — REVISION APPROVAL
 
-> Before ADR-002 can be considered implementation-ready, ALL of the following must be true:
+| Field | Value |
+|-------|-------|
+| ADR | ADR-002 |
+| Revision | 2.0 |
+| Date | 2026-09-01 |
+| Status | APPROVED — Dual-Profile Architecture |
+| Design Direction | APPROVED |
+| Implementation | NOT YET STARTED |
+| Role | Principal Engineer ONLY |
+| Trader Brain | DISABLED |
+| Live Trading | DISABLED |
 
-- [x] Schema ownership defined (this document — Table design in Step 8)
-- [x] Source-of-truth defined (Step 3 — DB authoritative for orders/positions/risk; Exchange authoritative for fills)
-- [x] Order lifecycle defined (Step 4 — SUBMITTED → ACK → FILL → CLOSED)
-- [x] Position lifecycle defined (Step 4 — OPEN → PRICE_UPDATE → SL/TP → CLOSED)
-- [x] Event model defined (Step 5 — append-only event log with sequence IDs)
-- [x] Idempotency defined (Step 6 — client_order_id + unique constraints + replay)
-- [x] Recovery defined (Step 7 — 10 failure scenarios with detection/recovery)
-- [x] Migration strategy defined (Step 10 — 6 incremental phases)
-- [x] Security defined (Step 11 — least privilege, vault for secrets, SSL)
-- [x] Retention defined (Step 9 — HOT/WARM/COLD classification)
-- [x] Indexes justified (Step 12 — composite indexes defined)
-- [x] Testing strategy defined (unit + integration + contract tests for DB layer)
-- [x] PostgreSQL validated (Step 13 — appropriate for all requirements)
-
-**Status:** All criteria met (design complete). Implementation is NOT started.
-
----
-
-## STEP 16 — MASTER PROJECT MAP UPDATE
-
-Updated documentation confirms:
-- ADR-001 = APPROVED (Hybrid TypeScript core + optional Python)
-- ADR-002 = PENDING HUMAN DECISION (PostgreSQL confirmed, schema designed)
-- Implementation = NOT STARTED (no DB created, no migrations, no source changes)
-- Documentation-first policy = ACTIVE
-
----
-
-## FINAL REPORT
-
-**STATUS:** ADR-002 review complete. No database created. No source modified. No migration started.
-
-**FILES CREATED/UPDATED:**
-- `docs/audit/29-adr-002-database-review.md` — FULL REVIEW (this file)
-- `docs/audit/22-architecture-decisions.md` — ADR-002 status noted (PENDING)
-- `docs/audit/27-vua-master-project-map.md` — ADR-002 blocker updated (current blocker after ADR-001 approved)
-- `docs/audit/00-audit-summary.md` — ADR-002 listed as current blocker
-
-**CURRENT PERSISTENCE STATE:** Zero. All 14 services in-memory only (`executionEngine`, `memoryLedger`, `riskEngine`, `multiAgentBrain`, `apiRouter`, `binance`/`bybit`, `researchLab`). No DB. Synthetic fallback visible in exchange clients. No audit trail. No historical data. No event log.
-
-**RECOMMENDED DATABASE:** PostgreSQL (Option A) — ACID, relational, TypeScript (Prisma) + Python (SQLAlchemy) compatible, mature, operational simplicity.
-
-**SOURCE-OF-TRUTH MODEL:** DB authoritative for submitted orders, risk decisions, position state, audit events. Exchange authoritative for fills and live prices. DB corrected by reconciliation.
-
-**TRADING STATE MODEL:** Signal → Decision (DB) → Risk Veto (DB audit) → Order (DB, idempotent) → Acknowledgment (DB + Exchange) → Fill (DB + Exchange, DB event immutable) → Position (DB + Exchange, DB corrected by reconciliation) → Reconciliation (DB event + correction).
-
-**EVENT MODEL:** Append-only events (`fill_events`, `position_events`, `order_events`, `risk_decisions`, `system_events`, `reconciliation_events`). Events have sequence numbers for ordering. Status updates allowed on state tables (`orders`, `positions`) — events remain immutable.
-
-**IDEMPOTENCY MODEL:** Client order ID (VUA-generated) + DB unique constraint `(client_order_id, exchange, symbol)` + retry with same ID + replay from DB + replay events in sequence + exchange query for acknowledgment recovery.
-
-**RECOVERY MODEL:** 10 scenarios designed (crash, DB crash, exchange disconnect, lost acknowledgment, DB write failure, restart with open position, DB/Exchange disagreement). Each: detection method, recovery action, source of truth, safe behavior, audit record.
-
-**SCHEMA SUMMARY (Conceptual — Not Created):** 11 core entities (`system_config`, `accounts`, `orders`, `fill_events`, `positions`, `position_events`, `decisions`, `risk_decisions`, `config_history`, `reconciliation_events`, `system_events`, `market_data_candles` + indexes + FKs + unique constraints + timestamp fields + event sequence fields). Full conceptual schema in Step 8.
-
-**SECURITY MODEL:** Least-privilege DB user (no DROP/ALTER for app); separate migration role; SSL connections; vault-backed secret retrieval (not DB plaintext); audit tables read-only for app; backup/encryption for 7-year retention.
-
-**RETENTION MODEL:** HOT (open state + 30d candles + recent audit) in PostgreSQL; WARM (1yr candles + 2yr closed trades + 3yr risk) in partitioned PostgreSQL; COLD (5yr+ candles + 7yr audit) in archive; EPHEMERAL (ticker, order book, indicators) in memory/Redis.
-
-**MIGRATION STRATEGY (6 phases, all documentation only):** Phase 1 = Schema; Phase 2 = Persistence abstraction; Phase 3 = Order/position persistence; Phase 4 = Risk persistence; Phase 5 = Event/audit persistence; Phase 6 = Reconciliation. All reversible and incremental.
-
-**ADR-002 STATUS:** PENDING HUMAN DECISION — Schema is fully designed. Implementation (TASK-P0-002) must NOT start until human approves.
-
-**BLOCKING IDEAS:**
-- Must confirm PostgreSQL (already recommended; just needs approval)
-- Must confirm Prisma ORM (TypeScript) for Phase 1
-- Must confirm TimescaleDB need (probably deferred to Phase 6+)
-- Must confirm Redis (optional, deferred)
-
-**NEXT DOCUMENTATION TASK:** When ADR-002 approved, update 22-architecture-decisions.md (ADR-002 = APPROVED) and begin Phase 1 planning.
-
-**STOP:** No PostgreSQL created. No schema written. No migrations. No package changes. No source modified. Only this document and reference updates.
-
-*Document prepared by Hermes Agent (Principal Engineer). Read-only inspection. No database created. No code changed.*
+**Implementation is authorized to proceed** for both profiles once environments are validated.

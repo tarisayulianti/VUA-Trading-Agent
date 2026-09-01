@@ -75,27 +75,51 @@ Key findings of the review:
 
 ---
 
-## ADR-002: Database Choice (PostgreSQL vs None)
+## ADR-002: Database Choice (Dual-Profile — SQLite + PostgreSQL 16)
 
 **QUESTION:** Which database for persistent trading state, orders, positions, audit logs?
 
-**WHY IT MATTERS:** Blueprint mandates PostgreSQL with 10 DDL tables (market_events, signals, orders, risk_decisions, etc.). Current repo has zero persistence.
+**WHY IT MATTERS:** Blueprint mandates PostgreSQL with 10 DDL tables. Current repo has zero persistence. PostgreSQL 16 cannot run in Android/Termux/PRoot environments (environment limitation confirmed via four exhaustive recovery attempts: uDocker pull blocked, native apt package absent, PGDG dependency conflict, no pre-existing binary).
 
 **CURRENT STATE:** No database. Memory-only EpistemicMemoryLedger with seeded fake history.
 
-**OPTIONS:**
+**DECISION (APPROVED — DUAL-PROFILE):**
 
-| Option | Pros | Cons | Impact |
-|--------|------|------|--------|
-| A: PostgreSQL (blueprint) | Relational integrity; ACID; blueprint schema ready; mature | Operational overhead; needs migrations; connection pooling | P0 - required for production |
-| B: SQLite (embedded) | Zero config; portable; good for dev/paper | Not production-grade for concurrent trading | P2 - dev only |
-| C: Redis + PostgreSQL | Fast cache + durable store | More complex | P1 - if scale needed |
+| Profile | Database | Provider | Environment | Status |
+|---------|----------|----------|-------------|--------|
+| Profile A | SQLite 3 | `prisma` with `sqlite` | Android / Termux / Ubuntu PRoot | APPROVED for local dev |
+| Profile B | PostgreSQL 16 | `prisma` with `postgresql` | PC / Server / Production | APPROVED for production |
 
-**DEPENDENCIES:** ADR-001 (language determines ORM choice: Prisma/TypeORM vs SQLAlchemy).
+**PROFILE A (SQLite):**
+- Single-device, local persistence
+- Single process only — not production-grade
+- Development/testing on Android devices
+- Full Prisma ORM support
+- WAL mode + FK enforcement required
 
-**RECOMMENDATION:** PostgreSQL per blueprint. Use Prisma if TypeScript, SQLAlchemy/Alembic if Python.
+**PROFILE B (PostgreSQL 16):**
+- Production-grade ACID guarantees
+- Full concurrent write support
+- Docker Compose deployment
+- Full Prisma ORM support
+- NUMERIC precision for financial data
 
-**DECISION STATUS:** PENDING HUMAN DECISION (depends on ADR-001)
+**DEPENDENCIES:** ADR-001 (language determines ORM choice: Prisma for TypeScript).
+
+**ORM:** Prisma (single schema, provider-switched at build time)
+**Migration:** Shared directory; provider-compatible SQL only
+**DATABASE_URL:** Determined by deployment profile
+
+**KEY CONSTRAINTS:**
+- SQLite is NOT a production replacement for PostgreSQL
+- Profile A is local/single-device only
+- Schema must remain compatible with both providers
+- Decimal precision difference documented (SQLite = floating-point approximation)
+- Production deployment must use Profile B (PostgreSQL 16)
+
+**DOCUMENTATION:** See `29-adr-002-database-review.md` (revised 2026-09-01)
+
+**DECISION STATUS:** APPROVED — Dual-Profile (revised 2026-09-01)
 
 ---
 

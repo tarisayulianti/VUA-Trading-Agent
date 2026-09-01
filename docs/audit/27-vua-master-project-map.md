@@ -77,7 +77,7 @@ Highest-level project map. Answers 13 mandatory questions. Contains Mermaid road
 | ADR | Topic | Status |
 |-----|-------|--------|
 | ADR-001 | TypeScript vs Python core | **APPROVED** — Hybrid (TS core + optional Python worker) |
-| ADR-002 | Database (PostgreSQL + Prisma) | **APPROVED** — Human approved 2026-08-31; P0-002 design complete; BLOCKED — ENVIRONMENT (Proot-Distro, no Docker daemon) — resume requires functional Docker host |
+| ADR-002 | Database (PostgreSQL + Prisma) | **APPROVED** — Dual-Profile (SQLite Android / PostgreSQL 16 production); **P0-002-A SQLite Profile A = PASS** (Node 24 LTS + Prisma 7.10.0 + better-sqlite3 ARM64); **P0-002-B PostgreSQL Profile B = BLOCKED — ENVIRONMENT** (separate runtime; PC/server required) |
 | ADR-003 | Exchange abstraction (interface + ccxt) | PROPOSED — Handoff prepared in `32`; awaiting ADR-002 approval + exchange selection |
 | ADR-004 | Execution architecture (paper → testnet → live) | PROPOSED |
 | ADR-005 | AI orchestration (Gemini + deterministic fallback) | PROPOSED |
