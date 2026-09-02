@@ -22,6 +22,7 @@ interface HeaderProps {
   onOpenKillSwitchModal: () => void;
   onRefresh: () => void;
   isRefreshing: boolean;
+  syntheticDataMode?: boolean;
 }
 
 const AVAILABLE_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenKillSwitchModal,
   onRefresh,
   isRefreshing,
+  syntheticDataMode,
 }) => {
   const isKillSwitchEngaged = status?.killSwitchEngaged;
   const isCircuitBreakerActive = status?.circuitBreakerActive;
@@ -68,6 +70,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div id="vua-circuit-breaker-banner" className="bg-amber-600 px-4 py-2 flex items-center space-x-2 text-xs font-semibold text-white shadow-xs">
           <AlertTriangle className="w-4 h-4" />
           <span>DAILY DRAWDOWN CIRCUIT BREAKER TRIPPED — Portfolio loss exceeds daily limit. New orders vetoed.</span>
+        </div>
+      )}
+
+      {syntheticDataMode && (
+        <div id="vua-synthetic-mode-banner" className="bg-violet-600 px-4 py-2 flex items-center space-x-2 text-xs font-semibold text-white shadow-xs">
+          <AlertTriangle className="w-4 h-4" />
+          <span>SYNTHETIC DATA MODE — Market data is NOT live exchange data. All prices, order book, and candles are simulated for non-production use only.</span>
         </div>
       )}
 

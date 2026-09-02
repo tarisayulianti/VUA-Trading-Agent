@@ -66,6 +66,7 @@ export default function App() {
   const [isBacktesting, setIsBacktesting] = useState(false);
   const [isUpdatingPostMortem, setIsUpdatingPostMortem] = useState(false);
   const [isKillSwitchModalOpen, setIsKillSwitchModalOpen] = useState(false);
+  const [syntheticDataMode, setSyntheticDataMode] = useState(false);
 
   // Fetch full system state
   const fetchState = useCallback(async () => {
@@ -82,6 +83,7 @@ export default function App() {
       if (statusRes.ok) {
         const sData = await statusRes.json();
         setStatus(sData.status);
+        setSyntheticDataMode(Boolean(sData.syntheticDataMode));
         if (sData.lastDeliberation) setDebate(sData.lastDeliberation);
         if (sData.lastRiskCheck) setLastRiskCheck(sData.lastRiskCheck);
         if (sData.riskConfig) setRiskConfig(sData.riskConfig);
@@ -378,6 +380,7 @@ export default function App() {
           setTimeout(() => setIsRefreshing(false), 500);
         }}
         isRefreshing={isRefreshing}
+        syntheticDataMode={syntheticDataMode}
       />
 
       {/* Main Structural Navigation Tabs */}

@@ -1,4 +1,5 @@
 import { Candle, MarketTicker, OrderBook, OrderBookLevel } from '../../src/types/trading';
+import { db } from '../db';
 
 /**
  * Bybit v5 Market REST API Client
@@ -55,6 +56,40 @@ export class BybitService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return {
+          symbol,
+          exchange: 'bybit',
+          price: 65000,
+          bid: 64990,
+          ask: 65010,
+          spread: 20,
+          high24h: 66200,
+          low24h: 63800,
+          volume24h: 24500,
+          change24h: 1.45,
+          fundingRate: 0.0001,
+          openInterest: undefined,
+          timestamp: Date.now(),
+        };
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Bybit getTicker failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'bybit',
+              method: 'getTicker',
+              symbol,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Bybit getTicker:', logErr);
+      }
       throw new Error(`Bybit getTicker failed for ${symbol}: ${message}`);
     }
   }
@@ -107,6 +142,40 @@ export class BybitService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return {
+          symbol,
+          exchange: 'bybit',
+          bids: [
+            { price: 64990, amount: 1.2, total: 1.2 },
+            { price: 64980, amount: 0.8, total: 2.0 },
+          ],
+          asks: [
+            { price: 65010, amount: 1.1, total: 1.1 },
+            { price: 65020, amount: 0.9, total: 2.0 },
+          ],
+          imbalanceRatio: 1,
+          timestamp: Date.now(),
+        };
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Bybit getOrderBook failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'bybit',
+              method: 'getOrderBook',
+              symbol,
+              limit,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Bybit getOrderBook:', logErr);
+      }
       throw new Error(`Bybit getOrderBook failed for ${symbol}: ${message}`);
     }
   }
@@ -136,20 +205,37 @@ export class BybitService {
       }));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return Array.from({ length: 60 }, (_, i) => ({
+          timestamp: Date.now() - (60 - i) * 900000,
+          open: 65000,
+          high: 65200,
+          low: 64800,
+          close: 65100,
+          volume: 1000,
+        }));
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Bybit getKlines failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'bybit',
+              method: 'getKlines',
+              symbol,
+              interval,
+              limit,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Bybit getKlines:', logErr);
+      }
       throw new Error(`Bybit getKlines failed for ${symbol}: ${message}`);
     }
-  }
-
-  private generateSyntheticTicker(symbol: string): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getTicker failed for ${symbol}`);
-  }
-
-  private generateSyntheticOrderBook(symbol: string): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getOrderBook failed for ${symbol}`);
-  }
-
-  private generateSyntheticCandles(symbol: string, count = 60): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getKlines failed for ${symbol}`);
   }
 }
 

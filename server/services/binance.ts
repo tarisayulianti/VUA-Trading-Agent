@@ -1,4 +1,5 @@
 import { Candle, MarketTicker, OrderBook, OrderBookLevel } from '../../src/types/trading';
+import { db } from '../db';
 
 /**
  * Binance REST API Client with robust failover
@@ -66,6 +67,39 @@ export class BinanceService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return {
+          symbol,
+          exchange: 'binance',
+          price: 65000,
+          bid: 64990,
+          ask: 65010,
+          spread: 20,
+          high24h: 66200,
+          low24h: 63800,
+          volume24h: 24500,
+          change24h: 1.45,
+          fundingRate: 0.0001,
+          timestamp: Date.now(),
+        };
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Binance getTicker failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'binance',
+              method: 'getTicker',
+              symbol,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Binance getTicker:', logErr);
+      }
       throw new Error(`Binance getTicker failed for ${symbol}: ${message}`);
     }
   }
@@ -117,6 +151,39 @@ export class BinanceService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return {
+          symbol,
+          exchange: 'binance',
+          bids: [
+            { price: 64990, amount: 1.2, total: 1.2 },
+            { price: 64980, amount: 0.8, total: 2.0 },
+          ],
+          asks: [
+            { price: 65010, amount: 1.1, total: 1.1 },
+            { price: 65020, amount: 0.9, total: 2.0 },
+          ],
+          imbalanceRatio: 1,
+          timestamp: Date.now(),
+        };
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Binance getOrderBook failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'binance',
+              method: 'getOrderBook',
+              symbol,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Binance getOrderBook:', logErr);
+      }
       throw new Error(`Binance getOrderBook failed for ${symbol}: ${message}`);
     }
   }
@@ -144,20 +211,37 @@ export class BinanceService {
       }));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      if (process.env.USE_SYNTHETIC_DATA === 'true') {
+        return Array.from({ length: 60 }, (_, i) => ({
+          timestamp: Date.now() - (60 - i) * 900000,
+          open: 65000,
+          high: 65200,
+          low: 64800,
+          close: 65100,
+          volume: 1000,
+        }));
+      }
+      try {
+        await db.system_events.create({
+          data: {
+            event_type: 'DATA_QUALITY_ERROR',
+            description: `Binance getKlines failed for ${symbol}: ${message}`,
+            severity: 'ERROR',
+            metadata_json: {
+              source: 'binance',
+              method: 'getKlines',
+              symbol,
+              interval,
+              limit,
+              error: message,
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error('Failed to log DATA_QUALITY_ERROR for Binance getKlines:', logErr);
+      }
       throw new Error(`Binance getKlines failed for ${symbol}: ${message}`);
     }
-  }
-
-  private generateSyntheticTicker(symbol: string): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getTicker failed for ${symbol}`);
-  }
-
-  private generateSyntheticOrderBook(symbol: string): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getOrderBook failed for ${symbol}`);
-  }
-
-  private generateSyntheticCandles(symbol: string, count = 60): never {
-    throw new Error(`Synthetic fallback DISABLED (P0-003): getKlines failed for ${symbol}`);
   }
 }
 

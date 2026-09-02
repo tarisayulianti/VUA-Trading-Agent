@@ -16,6 +16,7 @@ import { executionEngine } from '../services/executionEngine';
 import { memoryLedger } from '../services/memoryLedger';
 import { researchLab } from '../services/researchLab';
 import { getGeminiCircuitBreakerStatus } from '../services/geminiClient';
+import { db } from '../db';
 
 export const apiRouter = Router();
 
@@ -189,6 +190,7 @@ apiRouter.get('/status', (req: Request, res: Response) => {
     riskConfig: riskEngine.getConfig(),
     credentials: executionEngine.getCredentialsStatus(),
     geminiStatus: getGeminiCircuitBreakerStatus(),
+    syntheticDataMode: process.env.USE_SYNTHETIC_DATA === 'true',
   });
 });
 
@@ -463,4 +465,42 @@ apiRouter.get('/stream', (req: Request, res: Response) => {
   req.on('close', () => {
     sseClients = sseClients.filter((c) => c !== res);
   });
+});
+
+// 16. Data Quality Events
+apiRouter.get('/data-quality', async (req: Request, res: Response) => {
+  try {
+    const events = await db.system_events.findMany({
+      where: {
+        event_type: 'DATA_QUALITY_ERROR',
+      },
+      orderBy: {
+        timestamp: 'desc',
+      },
+      take: 100,
+    });
+
+    const now = Date.now();
+    const items = events.map((event) => {
+      const metadata = (event.metadata_json as Record<string, unknown> | null) ?? {};
+      const ts = new Date(event.timestamp).getTime();
+      return {
+        id: event.id,
+        eventType: event.event_type,
+        description: event.description,
+        severity: event.severity,
+        source: typeof metadata.source === 'string' ? metadata.source : null,
+        method: typeof metadata.method === 'string' ? metadata.method : null,
+        symbol: typeof metadata.symbol === 'string' ? metadata.symbol : null,
+        error: typeof metadata.error === 'string' ? metadata.error : null,
+        timestamp: event.timestamp.toISOString(),
+        ageMs: now - ts,
+      };
+    });
+
+    res.json({ items });
+  } catch (err: any) {
+    console.error('Failed to load data-quality events:', err);
+    res.status(500).json({ error: 'Failed to load data-quality events' });
+  }
 });
