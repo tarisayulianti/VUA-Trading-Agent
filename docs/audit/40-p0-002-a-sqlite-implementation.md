@@ -1,8 +1,6 @@
 # P0-002-A — SQLite Profile A Implementation Report
-**Date:** 2026-09-01
-**Role:** Principal Engineer ONLY
-**Environment:** Android / Termux / Ubuntu PRoot (Linux 6.17.0-PRoot-Distro, aarch64)
-**Profile:** A — Local / Android / SQLite
+
+**⚠️ SUPERSEDED:** This document records the **BLOCKED — ENVIRONMENT** state as of 2026-09-01. P0-002-A SQLite Profile A later completed successfully on native Windows with project-boundary isolation (`prisma-sqlite/`). See `docs/audit/72-p0-002-final-closeout-audit.md` for the final state. Historical content preserved below for audit trail.
 
 ---
 

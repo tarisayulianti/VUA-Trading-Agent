@@ -1,27 +1,14 @@
 # TASK-P0-002 — PostgreSQL + Prisma Initialization — FINAL REPORT
 
-**Task:** TASK-P0-002
-**Date:** 2026-08-31
-**Authorization:** ADR-002 APPROVED (Human)
-**Role:** Principal Engineer ONLY
-**Trader Brain:** DISABLED
-**Live Trading:** DISABLED
+**⚠️ SUPERSEDED:** This document records the **BLOCKED — ENVIRONMENT** state as of 2026-08-31. P0-002-B PostgreSQL implementation later completed successfully on native Windows. See `docs/audit/72-p0-002-final-closeout-audit.md` for the final state. Historical content preserved below for audit trail.
 
 ---
 
 ## FINAL VERDICT
 
-**STATUS: BLOCKED — ENVIRONMENT** (definitive; runtime cannot be validated in this session)
+**STATUS: SUPERSEDED — HISTORICAL RECORD ONLY**
 
-**Reason:** Environment limitations persist after re-diagnosis:
-- Docker daemon unreachable (`docker info` hangs at "Server:"; `docker ps` exit 124)
-- `docker compose` (plugin) returns "unknown shorthand flag -f" — v2 plugin not wired to v29 client correctly; daemon required
-- `docker-compose` (v1 binary) not present
-- `npm install` returns exit 0 but `node_modules/` not created (no `package-lock.json`; `bun.lock` present; `bun` binary not in PATH)
-- Prisma binary not installed; cannot run `prisma validate`, `prisma generate`, `prisma migrate dev`
-- PostgreSQL container cannot start → no live DB → no transaction test
-
-**No workaround created:** No SQLite, no mock DB, no fake Prisma, no synthetic data, no in-memory substitute.
+This document recorded the **BLOCKED — ENVIRONMENT** state as of 2026-08-31 for the initial P0-002 PostgreSQL implementation attempt in an incompatible environment (Proot-Distro without Docker daemon). This implementation later completed successfully on native Windows PC as **P0-002-B**. See `docs/audit/72-p0-002-final-closeout-audit.md` for the final state. Historical content preserved below for audit trail.
 
 ---
 

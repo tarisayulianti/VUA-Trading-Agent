@@ -184,9 +184,9 @@ All 12 synthetic paths fall into **ONE** classification:
 | Dependency | Status | Evidence |
 |------------|--------|----------|
 | ADR-001 | APPROVED | `docs/audit/22-architecture-decisions.md` |
-| ADR-002 | APPROVED (human) | `docs/audit/22-architecture-decisions.md` |
-| ADR-003 | APPROVED (human) | `docs/audit/36-adr-003-exchange-abstraction.md` |
-| P0-002 (PostgreSQL) | BLOCKED — ENVIRONMENT | `docs/audit/35-p0-002-environment-blocker-checkpoint.md`; Docker daemon unreachable in Proot-Distro |
+| ADR-002 | APPROVED | `docs/audit/22-architecture-decisions.md` |
+| ADR-003 | APPROVED | `docs/audit/36-adr-003-exchange-abstraction.md` |
+| P0-002 (Profile A + Profile B) | COMPLETE | `docs/audit/72-p0-002-final-closeout-audit.md`; commits `3b4ace3` and `6d41144` |
 
 ### P0-003 Downstream Dependencies (blocked by P0-003 PASS)
 
@@ -199,34 +199,25 @@ All 12 synthetic paths fall into **ONE** classification:
 
 ### P0-002 Relationship
 
-P0-002 (PostgreSQL + Prisma) and P0-003 (Remove Synthetic Fallback) are **parallel tasks in the dependency graph**, but P0-003 cannot complete its runtime validation without a working database (P0-002 PASS). The synthetic fallback removal changes the production code path; to verify the change, P0-002's database must be operational to confirm the new real-data behavior.
+P0-002 (PostgreSQL + Prisma) and P0-003 (Remove Synthetic Fallback) are **parallel tasks in the dependency graph**. P0-003 runtime validation benefits from P0-002 PASS because the database provides durable data quality logging and audit trail. The synthetic fallback removal changes the production code path; P0-002's databases are operational and can confirm the new real-data behavior.
 
-**Therefore:** P0-003 implementation is architecturally ready (code changes are simple — replace `catch` synthetic fallback with explicit failure), but **runtime validation requires P0-002 PASS**.
+**Therefore:** P0-003 implementation is architecturally ready. Runtime validation can proceed against Profile A SQLite or Profile B PostgreSQL.
 
 ---
 
 ## 10. P0-002 DEPENDENCY STATUS
 
 ```
-P0-002 STATUS: BLOCKED — ENVIRONMENT
-Reason: Docker daemon unreachable (Proot-Distro kernel 6.17.0; CapEff=0000000000000000; iptables nft permission denied; docker info hangs; docker ps exit 124)
-Container status: Cannot start PostgreSQL
-Prisma install: node_modules not created (npm install exit 0 but no directory)
-Network registry: WORKING (registry.npmjs.org returns HTTP/2 200)
-No workaround permitted: No SQLite, no mock DB, no fake PostgreSQL, no prisma db push
-
-P0-002 RESUME CONDITIONS:
-1. Docker Engine functional — NOT MET
-2. Docker Compose functional — NOT MET
-3. PostgreSQL container running — NOT MET
-4. Network/package registry accessible — MET
-5. Node/npm functional — MET (node v26.8.1, npm v11.19.0)
-6. Prisma dependency installable — NOT MET (no node_modules)
-7. Prisma CLI executable — NOT MET
+P0-002-A SQLite: COMPLETE
+P0-002-B PostgreSQL: COMPLETE
+Profile A database: prisma-sqlite/data/vua_p0_002_a.db
+Profile B database: PostgreSQL 16
+Prisma: 7.10.0
+Adapters: @prisma/adapter-better-sqlite3, @prisma/adapter-pg
 ```
 
-**P0-003 readiness for implementation:** YES (architecturally simple).
-**P0-003 runtime validation:** BLOCKED until P0-002 PASS.
+**P0-003 readiness for implementation:** YES
+**P0-003 runtime validation:** P0-002 PASS — both databases operational
 
 ---
 
@@ -496,7 +487,7 @@ Rationale:
 
 **NEXT ACTION:** Human approval for P0-003 implementation; P0-002 runtime restoration; do NOT start P0-004
 
-**P0-002 STATUS:** BLOCKED — ENVIRONMENT
+**STATUS:** READY AFTER P0-002 PASS
 
 **ADR-003 STATUS:** APPROVED — IMPLEMENTATION NOT STARTED
 

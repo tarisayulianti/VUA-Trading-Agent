@@ -10,7 +10,7 @@ The engine operates on a strictly cyclical architecture, executing the following
 ### 1. Data Ingestion (Polling/Streaming)
 - **Files**: `server/services/binance.ts` & `server/services/bybit.ts`
 - **Function**: Polls REST endpoints (`/api/v3/ticker/24hr`, `/api/v3/depth`) for Tickers, Order Books, and Klines. 
-- **Resilience**: If the API is rate-limited or internet is disconnected, it catches the error and auto-generates `Synthetic Data` so the pipeline doesn't crash, allowing continuous testing.
+|- **Resilience**: If the API is rate-limited or internet is disconnected, the error is caught and re-thrown as a failed fetch. The production path does not generate synthetic market data; failures must be surfaced explicitly.
 
 ### 2. Market Perception & Indicators
 - **Files**: `server/services/indicators.ts` & `server/services/regime.ts`

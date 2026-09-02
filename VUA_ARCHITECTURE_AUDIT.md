@@ -74,3 +74,54 @@ Jika sistem ini ingin dilanjutkan untuk menjadi platform skala institusional ses
    * Implementasikan konektor WebSocket untuk menarik data nyata dari Binance/Bybit Testnet (Klines, Orderbook), lalu simpan ke dalam database sebagai `MarketEvent`.
 4. **Terapkan "Hard Veto" Risk Engine secara Deterministik (Phase 5):**
    * Logika perlindungan modal (Max Drawdown, Risk per Trade) **tidak boleh** diletakkan di *Frontend*. Logika ini wajib ditulis di *Backend* (Node.js/Python) untuk menolak eksekusi API secara deterministik sebelum menyentuh bursa.
+
+---
+
+## 6. RECONCILIASI STATUS AKTUAL (2026-09-02)
+
+Bagian ini menambahkan konteks aktual terhadap laporan awal. Temuan-temuan pada bagian 3 tetap dipertahankan sebagai catatan historis, tetapi sebagian sudah diganti oleh implementasi P0-002.
+
+### 6.1 Status P0-002 — Database & Persistence
+
+| Item | Temuan Awal (Doc ini) | Status Aktual |
+|------|----------------------|---------------|
+| Database relasional | **Tidak ada** — tidak ada adapter, ORM, atau koneksi PostgreSQL | **SELESAI** — Profile A (SQLite) dan Profile B (PostgreSQL 16) keduanya sudah diimplementasikan dan dikommit ke `main` |
+| Prisma / ORM | **Tidak ada** | **SELESAI** — Prisma 7.10.0 digunakan untuk kedua profil |
+| Schema DDL | **Tidak ada** | **SELESAI** — 12 tabel aplikasi + `_prisma_migrations` diterapkan untuk Profile A; schema PostgreSQL siap untuk Profile B |
+| Persistence state | **Hilang saat restart** | **SELESAI** — Database file dan migration history bertahan; diverifikasi dengan CRUD kontrol dan reconnect |
+| ADR-001 (bahasa) | **Belum diselesaikan** | **SELESAI** — Disetujui Hybrid TypeScript + Optional Python Worker |
+| ADR-002 (database) | **Belum diselesaikan** | **SELESAI** — Disetujui dan diimplementasikan Dual-Profile: SQLite untuk Profile A, PostgreSQL 16 untuk Profile B |
+
+### 6.2 P0-002-A — Profile A (SQLite)
+
+- **Status:** COMPLETE
+- **Commit:** `3b4ace3` — `docs: finalize p0-002-a sqlite implementation and checkpoint`
+- **Boundary:** `prisma-sqlite/`
+- **Config:** `prisma-sqlite/prisma.config.ts`
+- **Schema:** `prisma-sqlite/schema-sqlite.prisma`
+- **Migration:** `prisma-sqlite/migrations/20260902103232_init/`
+- **Lockfile:** `prisma-sqlite/migrations/migration_lock.toml` — `provider = "sqlite"`
+- **Database:** `prisma-sqlite/data/vua_p0_002_a.db`
+- **Validation:** Prisma Client generation, controlled CRUD, persistence after reconnect
+
+### 6.3 P0-002-B — Profile B (PostgreSQL)
+
+- **Status:** COMPLETE
+- **Commit:** `6d41144` — `p0-002-b: close postgres persistence and validation`
+- **Boundary:** `prisma/`
+- **Config:** `prisma.config.postgres.ts`
+- **Schema:** `prisma/schema.prisma`
+- **Migration:** `prisma/migrations/20260901154749_p0_002_b_u1_clean_init/`
+- **Lockfile:** `prisma/migrations/migration_lock.toml` — `provider = "postgresql"`
+- **Validation:** PostgreSQL schema, UUID contract, migration history intact
+
+### 6.4 Dampak terhadap Temuan Awal
+
+Temuan nomor 1, 2, 3, 4, dan 5 pada bagian 3 sudah **tidak akurat** untuk kondisi saat ini:
+- Backend database dan persistence sudah terimplementasi.
+- Risk Engine, Execution Engine, dan komponen backend lainnya sudah ada di `server/services/`.
+- Data ingestion sudah terhubung ke REST API Binance/Bybit; synthetic fallback pada production path telah dinonaktifkan.
+
+Dokumen ini tetap mempertahankan temuan awal sebagai catatan historis. Untuk status proyek terkini, lihat:
+- `docs/audit/72-p0-002-final-closeout-audit.md`
+- `docs/audit/73-p0-003-implementation-audit-synthetic-fallback-inventory.md`

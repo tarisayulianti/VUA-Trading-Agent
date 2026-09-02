@@ -77,7 +77,7 @@ Highest-level project map. Answers 13 mandatory questions. Contains Mermaid road
 | ADR | Topic | Status |
 |-----|-------|--------|
 | ADR-001 | TypeScript vs Python core | **APPROVED** — Hybrid (TS core + optional Python worker) |
-| ADR-002 | Database (PostgreSQL) | **APPROVED** — Dual-Profile (SQLite Android / PostgreSQL 16 production); **P0-002-A SQLite Profile A = PASS**; **P0-002-B PostgreSQL Profile B = AWAITING U1 AUTHORIZATION** — forensic audit determined full UUID contract required; Option B minimal scope insufficient; see `docs/audit/44-p0-002-b-u1-full-uuid-contract-authorization.md` |
+| ADR-002 | Database (PostgreSQL) | **APPROVED** — Dual-Profile (SQLite Android / PostgreSQL 16 production); **P0-002-A SQLite Profile A = COMPLETE**; **P0-002-B PostgreSQL Profile B = COMPLETE** — see `docs/audit/72-p0-002-final-closeout-audit.md` |
 | ADR-003 | Exchange abstraction (interface + ccxt) | PROPOSED — Handoff prepared in `32`; awaiting ADR-002 approval + exchange selection |
 | ADR-004 | Execution architecture (paper → testnet → live) | PROPOSED |
 | ADR-005 | AI orchestration (Gemini + deterministic fallback) | PROPOSED |
@@ -283,7 +283,20 @@ graph TD
 
 **Primary blocker (RESOLVED):** ADR-001 — TypeScript vs Python core. **APPROVED** 2026-08-31: Hybrid (TypeScript core + optional Python worker).
 
-**Current blocker:** ADR-002 — PostgreSQL database confirmation.
+**Current blocker:** NONE — P0-002 COMPLETE. See `docs/audit/72-p0-002-final-closeout-audit.md`.
+**Next step:** P0-003 — Remove Synthetic Fallback / Enforce Real-Data Boundary, pending explicit implementation authorization.
+
+## 14. P0-002 RECONCILIATION (2026-09-02)
+
+P0-002 is COMPLETE for both profiles:
+
+- **P0-002-A:** Profile A SQLite implemented under `prisma-sqlite/`, migration `20260902103232_init` applied, database validated, committed as `3b4ace3`.
+- **P0-002-B:** Profile B PostgreSQL implemented under `prisma/`, migration `20260901154749_p0_002_b_u1_clean_init` applied, UUID contract validated, committed as `6d41144`.
+- **Dual-profile architecture:** Isolated configs, schemas, migrations, and databases. No shared history.
+
+Historical blocker records:
+- `docs/audit/34-p0-002-postgresql-implementation.md` — superseded; see Doc 72
+- `docs/audit/40-p0-002-a-sqlite-implementation.md` — superseded; see Doc 72
 
 With ADR-001 APPROVED:
 - TypeScript = mandatory core (Execution, Risk, Position, Reconciliation, Exchange, Market Data, Regime)
