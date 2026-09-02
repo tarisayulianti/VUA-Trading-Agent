@@ -1,0 +1,278 @@
+// VUA Trading Agent — Prisma Schema — SQLITE PROFILE A (Local Android / PRoot)
+// LOCATION: prisma/schema-sqlite.prisma
+// PURPOSE: SQLite-compatible variant of canonical schema for Profile A.
+// STATUS: Design only; schema preserved; adaptation creates provider-compatible version.
+// NOTE: The canonical schema.prisma (PostgreSQL 16, Profile B) is preserved untouched.
+//       This file is a NEW adaptation — it does NOT modify, replace, or delete schema.prisma.
+//
+// ADAPTATIONS FROM CANONICAL (documented):
+// - Provider changed from "postgresql" to "sqlite"
+// - Datasource URL configured for SQLite file path (env DATABASE_URL or default)
+// - UUID defaults: @default(uuid()) preserved (Prisma SQLite adapter maps to sqlite3 uuid extension or string-based UUID)
+// - DECIMAL type: preserved (Prisma SQLite adapter maps Decimal to REAL / numeric representation; application uses Decimal.js for precision)
+// - references on FK fields preserved (Prisma SQLite adapter handles UUID references as TEXT)
+// - etc. preserved (adapter maps to REAL/NUMERIC representation)
+// - Json type preserved (Prisma SQLite adapter stores JSON as TEXT)
+// - preserved (TEXT column)
+// - @@map("table_name") preserved (table names unchanged)
+// - @@index and @@unique constraints preserved
+// - Foreign key relations preserved (SQLite supports FKs with PRAGMA foreign_keys=ON)
+// - @updatedAt preserved
+// - BigInt @id @default(autoincrement()) preserved (SQLite AUTOINCREMENT supported)
+//
+// COMPATIBILITY: This variant is intended ONLY for Profile A (SQLite / Android / PRoot).
+// Profile B continues to use the canonical schema.prisma with PostgreSQL provider.
+// The canonical schema.prisma remains the authoritative design reference.
+
+// ============================================================
+// SQLITE PROFILE A — DATASOURCE
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client-sqlite"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============================================================
+// ALL MODELS FROM CANONICAL SCHEMA — PRESERVED LOGICALLY
+// ============================================================
+// All 11 entities (system_config, config_history, decisions, orders,
+// fill_events, positions, position_events, risk_decisions,
+// reconciliation_events, system_events, market_data_candles)
+// are preserved with identical logical structure.
+// SQLite-specific adaptations are handled by Prisma adapter mapping.
+
+model system_config {
+  id                        String   @id @default(uuid())
+  schema_version            Int      @default(1)
+  mode                     String   @default("PAPER")
+  selected_exchange        String   @default("BINANCE")
+  selected_symbol          String   @default("BTC/USDT")
+  initial_capital_usd     Decimal  @default(10000) @map("initial_capital_usd")
+  current_equity_usd      Decimal  @default(10000) @map("current_equity_usd")
+  daily_start_equity_usd  Decimal  @default(10000) @map("daily_start_equity_usd")
+  high_water_mark_usd     Decimal  @default(10000) @map("high_water_mark_usd")
+  max_drawdown_percent    Decimal  @default(3.0) @map("max_drawdown_percent")
+  autonomous_cycle_seconds Int     @default(12) @map("autonomous_cycle_seconds")
+  auto_trading_enabled    Boolean  @default(false) @map("auto_trading_enabled")
+  engine_running          Boolean  @default(false) @map("engine_running")
+  kill_switch_engaged     Boolean  @default(false) @map("kill_switch_engaged")
+  created_at              DateTime @default(now()) @map("created_at")
+  updated_at              DateTime @updatedAt @map("updated_at")
+  @@map("system_config")
+}
+
+model config_history {
+  id                   String   @id @default(uuid())
+  config_type          String   @map("config_type")
+  previous_config_json Json     @map("previous_config_json")
+  new_config_json      Json     @map("new_config_json")
+  changed_by           String   @map("changed_by")
+  timestamp            DateTime @default(now())
+  @@index([config_type, timestamp])
+  @@map("config_history")
+}
+
+model decisions {
+  id                          String   @id @default(uuid())
+  snapshot_hash               String   @map("snapshot_hash")
+  symbol                      String
+  exchange                    String
+  regime_at_decision          String   @map("regime_at_decision")
+  regime_confidence           Decimal  @map("regime_confidence")
+  trend_direction             String?  @map("trend_direction")
+  volatility_state            String?  @map("volatility_state")
+  macro_analyst_verdict      String   @map("macro_analyst_verdict")
+  technical_strategist_verdict String @map("technical_strategist_verdict")
+  contrarian_skeptic_verdict String   @map("contrarian_skeptic_verdict")
+  risk_officer_verdict       String   @map("risk_officer_verdict")
+  cio_synthesizer_verdict    String   @map("cio_synthesizer_verdict")
+  cio_final_verdict          String   @map("cio_final_verdict")
+  confidence_score            Decimal  @map("confidence_score")
+  edge_probability           Decimal  @map("edge_probability")
+  synthesis_rationale        String   @map("synthesis_rationale")
+  trade_hypothesis_json      Json?    @map("trade_hypothesis_json")
+  engine_mode                String   @map("engine_mode")
+  created_at                 DateTime @default(now()) @map("created_at")
+  risk_decision              risk_decisions?
+  orders                    orders[]
+  @@index([symbol, exchange, created_at])
+  @@index([cio_final_verdict, created_at])
+  @@map("decisions")
+}
+
+model orders {
+  id                String    @id @default(uuid())
+  client_order_id   String    @map("client_order_id")
+  exchange_order_id String?   @map("exchange_order_id")
+  decision_id       String?   @map("decision_id")
+  symbol            String
+  exchange          String
+  side              String
+  order_type        String    @default("MARKET") @map("order_type")
+  price             Decimal
+  quantity          Decimal
+  cost_usd          Decimal   @map("cost_usd")
+  leverage          Decimal
+  status            String    @default("SUBMITTED")
+  filled_quantity   Decimal   @default(0) @map("filled_quantity")
+  avg_fill_price    Decimal?  @map("avg_fill_price")
+  total_fee_usd    Decimal   @default(0) @map("total_fee_usd")
+  slippage_percent  Decimal   @default(0) @map("slippage_percent")
+  created_at        DateTime  @default(now()) @map("created_at")
+  acknowledged_at   DateTime? @map("acknowledged_at")
+  filled_at         DateTime? @map("filled_at")
+  updated_at        DateTime  @updatedAt @map("updated_at")
+  decision    decisions? @relation(fields: [decision_id], references: [id], onDelete: SetNull)
+  fill_events fill_events[]
+  positions  positions[]
+  @@unique([client_order_id, exchange, symbol])
+  @@index([symbol, exchange, status])
+  @@index([status, created_at])
+  @@map("orders")
+}
+
+model fill_events {
+  id               String   @id @default(uuid())
+  order_id         String   @map("order_id")
+  exchange_fill_id String   @map("exchange_fill_id")
+  symbol           String
+  exchange         String
+  side             String
+  fill_quantity    Decimal  @map("fill_quantity")
+  fill_price       Decimal  @map("fill_price")
+  fee_usd          Decimal  @map("fee_usd")
+  fee_rate         Decimal  @map("fee_rate")
+  liquidity        String?
+  timestamp        DateTime @default(now())
+  event_sequence   Int      @map("event_sequence")
+  order orders @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  @@unique([exchange_fill_id, symbol, timestamp])
+  @@index([order_id, event_sequence])
+  @@index([timestamp])
+  @@map("fill_events")
+}
+
+model positions {
+  id                    String   @id @default(uuid())
+  originating_order_id   String   @map("originating_order_id")
+  symbol                String
+  exchange              String
+  side                  String
+  entry_price           Decimal  @map("entry_price")
+  current_price         Decimal? @map("current_price")
+  quantity              Decimal
+  initial_quantity      Decimal  @map("initial_quantity")
+  leverage              Decimal
+  initial_margin_usd    Decimal  @map("initial_margin_usd")
+  unrealized_pnl_usd    Decimal  @default(0) @map("unrealized_pnl_usd")
+  unrealized_pnl_percent Decimal  @default(0) @map("unrealized_pnl_percent")
+  stop_loss_price       Decimal  @map("stop_loss_price")
+  trailing_stop_price   Decimal? @map("trailing_stop_price")
+  take_profit_1_price  Decimal  @map("take_profit_1_price")
+  take_profit_2_price  Decimal  @map("take_profit_2_price")
+  take_profit_3_price  Decimal  @map("take_profit_3_price")
+  liquidation_price     Decimal  @map("liquidation_price")
+  realized_pnl_usd      Decimal  @default(0) @map("realized_pnl_usd")
+  status                String   @default("OPEN")
+  close_reason          String?  @map("close_reason")
+  opened_at             DateTime @default(now()) @map("opened_at")
+  closed_at             DateTime? @map("closed_at")
+  updated_at            DateTime @updatedAt @map("updated_at")
+  originating_order orders          @relation(fields: [originating_order_id], references: [id], onDelete: Restrict)
+  position_events position_events[]
+  @@index([symbol, exchange, status])
+  @@index([status, opened_at])
+  @@map("positions")
+}
+
+model position_events {
+  id                 String   @id @default(uuid())
+  position_id        String   @map("position_id")
+  event_type         String   @map("event_type")
+  price              Decimal
+  quantity           Decimal
+  unrealized_pnl_usd Decimal  @map("unrealized_pnl_usd")
+  realized_pnl_usd   Decimal? @map("realized_pnl_usd")
+  fee_usd            Decimal? @map("fee_usd")
+  metadata_json      Json?    @map("metadata_json")
+  timestamp          DateTime @default(now())
+  event_sequence     Int      @map("event_sequence")
+  position positions @relation(fields: [position_id], references: [id], onDelete: Restrict)
+  @@unique([position_id, event_sequence])
+  @@index([position_id, timestamp])
+  @@index([event_type, timestamp])
+  @@map("position_events")
+}
+
+model risk_decisions {
+  id                               String   @id @default(uuid())
+  decision_id                      String?  @unique @map("decision_id")
+  order_id                         String?  @map("order_id")
+  symbol                           String
+  exchange                         String
+  approved                         Boolean
+  veto_reason                     String?  @map("veto_reason")
+  checks_passed_json              Json     @map("checks_passed_json")
+  max_allowed_risk_usd            Decimal  @map("max_allowed_risk_usd")
+  recommended_position_size_usd     Decimal  @map("recommended_position_size_usd")
+  recommended_leverage             Decimal  @map("recommended_leverage")
+  estimated_liquidation_price      Decimal  @map("estimated_liquidation_price")
+  kelly_fraction                  Decimal  @map("kelly_fraction")
+  circuit_breaker_status          String   @map("circuit_breaker_status")
+  timestamp                       DateTime @default(now())
+  decision decisions? @relation(fields: [decision_id], references: [id], onDelete: SetNull)
+  @@index([symbol, exchange, timestamp])
+  @@index([approved, timestamp])
+  @@map("risk_decisions")
+}
+
+model reconciliation_events {
+  id                       String   @id @default(uuid())
+  symbol                   String
+  exchange                 String
+  event_type               String   @map("event_type")
+  db_state_json            Json     @map("db_state_json")
+  exchange_state_json      Json     @map("exchange_state_json")
+  discrepancy_description  String   @map("discrepancy_description")
+  resolution_action        String?  @map("resolution_action")
+  severity                 String   @default("INFO")
+  timestamp                DateTime @default(now())
+  @@index([symbol, exchange, timestamp])
+  @@index([event_type, timestamp])
+  @@index([severity, timestamp])
+  @@map("reconciliation_events")
+}
+
+model system_events {
+  id           String   @id @default(uuid())
+  event_type   String   @map("event_type")
+  description   String
+  severity     String   @default("INFO")
+  metadata_json Json?   @map("metadata_json")
+  timestamp    DateTime @default(now())
+  @@index([event_type, timestamp])
+  @@index([severity, timestamp])
+  @@map("system_events")
+}
+
+model market_data_candles {
+  id          BigInt   @id @default(autoincrement())
+  symbol      String
+  exchange    String
+  interval    String
+  open        Decimal
+  high        Decimal
+  low         Decimal
+  close       Decimal
+  volume      Decimal
+  timestamp   DateTime
+  ingested_at DateTime @default(now()) @map("ingested_at")
+  @@unique([symbol, exchange, interval, timestamp])
+  @@index([symbol, exchange, interval, timestamp])
+  @@map("market_data_candles")
+}

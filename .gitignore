@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+data/vua_p0_002_a.db
