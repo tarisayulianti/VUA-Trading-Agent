@@ -6,8 +6,8 @@ export default defineConfig({
   schema: path.join(__dirname, 'schema-sqlite.prisma'),
   migrate: {
     async adapter() {
-      const { PrismaSQLite } = await import('@prisma/adapter-sqlite')
-      return new PrismaSQLite({
+      const { PrismaBetterSQLite3 } = await import('@prisma/adapter-better-sqlite3')
+      return new PrismaBetterSQLite3({
         url: process.env.DATABASE_URL ?? 'file:./data/vua_p0_002_a.db',
       })
     },
